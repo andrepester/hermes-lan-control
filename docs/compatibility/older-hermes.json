@@ -1,0 +1,210 @@
+{
+  "date": "2026-10-31",
+  "supported_minimum": "0.22.3",
+  "manifest_requires_hermes": ">=0.22.3",
+  "platform": "darwin",
+  "candidate_policy": "requires_hermes removed only in disposable manifests; runtime source unchanged",
+  "results": [
+    {
+      "version": "v0.21.6",
+      "commit": "818c13be1dc4fd28987e1e881a9408224afd4535",
+      "sdk_epoch_export": false,
+      "config_secret_integration": true,
+      "save_config_merge_option": true,
+      "native_smoke": "not_run",
+      "supported_current_range": false
+    },
+    {
+      "version": "v0.21.7",
+      "commit": "71d34bad1045610252eda02ee79549436896e784",
+      "sdk_epoch_export": false,
+      "config_secret_integration": true,
+      "save_config_merge_option": true,
+      "native_smoke": "not_run",
+      "supported_current_range": false
+    },
+    {
+      "version": "v0.22.0",
+      "commit": "e06df9c2eae6901f4c88f464e0ae6e753c0428b8",
+      "sdk_epoch_export": false,
+      "config_secret_integration": true,
+      "save_config_merge_option": true,
+      "native_smoke": "not_run",
+      "supported_current_range": false
+    },
+    {
+      "version": "v0.22.1",
+      "commit": "297552a9d646119871391d202509822cd86330df",
+      "sdk_epoch_export": true,
+      "config_secret_integration": true,
+      "save_config_merge_option": true,
+      "native_smoke": "passed",
+      "electron_dependency": "40.10.2",
+      "supported_current_range": false,
+      "native_result": {
+        "passed": true,
+        "hermes_version": "0.22.1",
+        "hermes_revision": "297552a9d646119871391d202509822cd86330df",
+        "candidate_probe": true,
+        "metadata_override": "requires_hermes removed only in disposable plugin copy",
+        "platform": "darwin",
+        "node": "v26.13.0",
+        "desktop_bundle_sha256": "954d7a761549166df66a4995ede306cf46ca206d79b7e9bb6ad0bf1e5073fb84",
+        "plugin_files_sha256": {
+          "plugin.yaml": "475a8001c026b953b8d3c7f8334a9d950afc50983229d2c0c40a006d26b96653",
+          "__init__.py": "10dd4d3d43ef053a0d91166c6cbb9c05f91e621cd10ea772c24c4c833828ffd4",
+          "desktop/plugin.js": "6385bfffb5c66421028d5873d5269b23d63fc3d79089cd6a84e6922cfa73fa81",
+          "dashboard/manifest.json": "6a1b5572db35f197f5f5273d8f213a733d15c003914007aaaaa224e4e2b1eb58",
+          "dashboard/plugin_api.py": "cd31e651c8402551c1926f8457aceb6dd8017edc93e5cc12d8fab696158723ed"
+        },
+        "repository_plugin_files_sha256": {
+          "plugin.yaml": "70ab9b7a4b3b9aa1e4dac5a3b4ae6fc1bcdc29c05ea110d3060ccbdfacebfdb8",
+          "__init__.py": "10dd4d3d43ef053a0d91166c6cbb9c05f91e621cd10ea772c24c4c833828ffd4",
+          "desktop/plugin.js": "6385bfffb5c66421028d5873d5269b23d63fc3d79089cd6a84e6922cfa73fa81",
+          "dashboard/manifest.json": "6a1b5572db35f197f5f5273d8f213a733d15c003914007aaaaa224e4e2b1eb58",
+          "dashboard/plugin_api.py": "cd31e651c8402551c1926f8457aceb6dd8017edc93e5cc12d8fab696158723ed"
+        },
+        "checks": [
+          "package discovery",
+          "SDK activation",
+          "loopback ping",
+          "authenticated loopback HTTP",
+          "manual recheck",
+          "native settings page",
+          "config persistence",
+          "secret persistence",
+          "wake disabled",
+          "Python UDP send guard"
+        ],
+        "authorized_health_requests": 1
+      }
+    },
+    {
+      "version": "v0.22.2",
+      "commit": "d923a5eb487a17c0a68801bba9ef0f56c81040a8",
+      "sdk_epoch_export": false,
+      "config_secret_integration": true,
+      "save_config_merge_option": true,
+      "native_smoke": "blocked_missing_sdk_export",
+      "supported_current_range": false,
+      "error_summary": "SDK module does not provide an export named 'gatewayActivationEpoch'",
+      "electron_dependency": "40.10.2"
+    },
+    {
+      "version": "v0.22.3",
+      "commit": "5b147ab036d6d19131bff8d20701b5001eab844a",
+      "sdk_epoch_export": true,
+      "config_secret_integration": true,
+      "save_config_merge_option": true,
+      "native_smoke": "passed",
+      "electron_dependency": "40.10.2",
+      "supported_current_range": true,
+      "native_result": {
+        "passed": true,
+        "hermes_version": "0.22.3",
+        "hermes_revision": "5b147ab036d6d19131bff8d20701b5001eab844a",
+        "candidate_probe": true,
+        "metadata_override": "requires_hermes removed only in disposable plugin copy",
+        "platform": "darwin",
+        "node": "v26.13.0",
+        "desktop_bundle_sha256": "fdf3fed71f6c9242df2de023365f19bd6f1717faecb97bb47edb4fc9d59d7148",
+        "plugin_files_sha256": {
+          "plugin.yaml": "475a8001c026b953b8d3c7f8334a9d950afc50983229d2c0c40a006d26b96653",
+          "__init__.py": "10dd4d3d43ef053a0d91166c6cbb9c05f91e621cd10ea772c24c4c833828ffd4",
+          "desktop/plugin.js": "6385bfffb5c66421028d5873d5269b23d63fc3d79089cd6a84e6922cfa73fa81",
+          "dashboard/manifest.json": "6a1b5572db35f197f5f5273d8f213a733d15c003914007aaaaa224e4e2b1eb58",
+          "dashboard/plugin_api.py": "cd31e651c8402551c1926f8457aceb6dd8017edc93e5cc12d8fab696158723ed"
+        },
+        "checks": [
+          "package discovery",
+          "SDK activation",
+          "loopback ping",
+          "authenticated loopback HTTP",
+          "manual recheck",
+          "native settings page",
+          "config persistence",
+          "secret persistence",
+          "wake disabled",
+          "Python UDP send guard"
+        ],
+        "authorized_health_requests": 1
+      }
+    },
+    {
+      "version": "v0.22.4",
+      "commit": "4d04303818b61bf3aa09278af48356315515965b",
+      "sdk_epoch_export": true,
+      "config_secret_integration": true,
+      "save_config_merge_option": true,
+      "native_smoke": "passed",
+      "electron_dependency": "40.10.2",
+      "supported_current_range": true,
+      "native_result": {
+        "passed": true,
+        "hermes_version": "0.22.4",
+        "hermes_revision": "4d04303818b61bf3aa09278af48356315515965b",
+        "candidate_probe": true,
+        "metadata_override": "requires_hermes removed only in disposable plugin copy",
+        "platform": "darwin",
+        "node": "v26.13.0",
+        "desktop_bundle_sha256": "5ed80d7740b9e5cd290e555b3cb619624026bc7aff0acc65a5080276cbb46fbc",
+        "plugin_files_sha256": {
+          "plugin.yaml": "475a8001c026b953b8d3c7f8334a9d950afc50983229d2c0c40a006d26b96653",
+          "__init__.py": "10dd4d3d43ef053a0d91166c6cbb9c05f91e621cd10ea772c24c4c833828ffd4",
+          "desktop/plugin.js": "6385bfffb5c66421028d5873d5269b23d63fc3d79089cd6a84e6922cfa73fa81",
+          "dashboard/manifest.json": "6a1b5572db35f197f5f5273d8f213a733d15c003914007aaaaa224e4e2b1eb58",
+          "dashboard/plugin_api.py": "cd31e651c8402551c1926f8457aceb6dd8017edc93e5cc12d8fab696158723ed"
+        },
+        "checks": [
+          "package discovery",
+          "SDK activation",
+          "loopback ping",
+          "authenticated loopback HTTP",
+          "manual recheck",
+          "native settings page",
+          "config persistence",
+          "secret persistence",
+          "wake disabled",
+          "Python UDP send guard"
+        ],
+        "authorized_health_requests": 1
+      }
+    },
+    {
+      "version": "v0.22.5",
+      "commit": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
+      "config_secret_integration": true,
+      "sdk_epoch_export": true,
+      "native_smoke": "passed_previous_baseline",
+      "supported_current_range": true,
+      "native_result": {
+        "passed": true,
+        "hermes_version": "0.22.5",
+        "hermes_revision": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
+        "platform": "darwin",
+        "node": "v26.13.0",
+        "desktop_bundle_sha256": "3cedb804a8010c7eb6edb04e9887be65d3ca7488c2f04e22123490b8b267ff1c",
+        "plugin_files_sha256": {
+          "plugin.yaml": "70ab9b7a4b3b9aa1e4dac5a3b4ae6fc1bcdc29c05ea110d3060ccbdfacebfdb8",
+          "__init__.py": "10dd4d3d43ef053a0d91166c6cbb9c05f91e621cd10ea772c24c4c833828ffd4",
+          "desktop/plugin.js": "6385bfffb5c66421028d5873d5269b23d63fc3d79089cd6a84e6922cfa73fa81",
+          "dashboard/manifest.json": "6a1b5572db35f197f5f5273d8f213a733d15c003914007aaaaa224e4e2b1eb58",
+          "dashboard/plugin_api.py": "cd31e651c8402551c1926f8457aceb6dd8017edc93e5cc12d8fab696158723ed"
+        },
+        "checks": [
+          "package discovery",
+          "SDK activation",
+          "loopback ping",
+          "authenticated loopback HTTP",
+          "manual recheck",
+          "native settings page",
+          "config persistence",
+          "secret persistence",
+          "wake disabled",
+          "Python UDP send guard"
+        ],
+        "authorized_health_requests": 1
+      }
+    }
+  ]
+}

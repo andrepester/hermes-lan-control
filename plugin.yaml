@@ -1,0 +1,50 @@
+name: lan-control
+version: "0.2.3"
+manifest_version: 2
+api_version: 1
+requires_hermes: ">=0.22.3"
+author: "André Pester"
+license: MIT
+homepage: https://github.com/andrepester/hermes-lan-control
+description: "Check a host and an optional health endpoint, and wake the host from the desktop status bar."
+config_schema:
+  display_name:
+    type: str
+    default: ""
+    description: "Display name. Leave blank to use the hostname."
+  host:
+    type: str
+    default: ""
+    description: "IP address or hostname to ping. For older configurations, a blank value uses the hostname from the health URL."
+  wol_mac:
+    type: str
+    default: ""
+    description: "Target MAC address, for example 02:00:00:00:00:01. Leave blank to disable Wake-on-LAN."
+  wol_broadcast:
+    type: str
+    default: ""
+    description: "IPv4 broadcast address for your network. This is not detected automatically."
+  wol_port:
+    type: int
+    default: 9
+    description: "Destination UDP port (1–65535)."
+  interval:
+    type: float
+    default: 5
+    description: "Time between checks, in seconds (2–300)."
+  timeout:
+    type: float
+    default: 2
+    description: "Timeout per check, in seconds (0.2–30). Must be shorter than the check interval."
+  health_url:
+    type: str
+    default: ""
+    description: "Optional HTTP or HTTPS health URL. Leave blank to disable HTTP checks. Do not include credentials or a fragment."
+  bearer_token:
+    type: secret
+    env: LAN_CONTROL_BEARER_TOKEN
+    description: "Optional bearer token. Used only by the backend."
+  expected_status:
+    type: str
+    default: ""
+    description: "Expected HTTP status (100–599). Defaults to 200 when blank. Ignored when no health URL is set."

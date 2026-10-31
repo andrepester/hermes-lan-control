@@ -1,0 +1,6 @@
+{
+  "name": "lan-control",
+  "label": "LAN Control",
+  "version": "0.2.3",
+  "api": "plugin_api.py"
+}

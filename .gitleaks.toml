@@ -1,0 +1,14 @@
+title = "Hermes LAN Control secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Reviewed backend SHA-256 fingerprint in native compatibility reports"
+condition = "AND"
+paths = ['''(^|/)docs/compatibility/(hermes-0\.22\.[35]-native|older-hermes)\.json$''']
+regexTarget = "secret"
+regexes = ['''^cd31e651c8402551c1926f8457aceb6dd8017edc93e5cc12d8fab696158723ed$''']

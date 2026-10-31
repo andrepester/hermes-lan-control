@@ -1,0 +1,132 @@
+name: Prepare catalog update
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published stable release tag (preview only)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalog-update
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.repository == 'andrepester/hermes-lan-control' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'release' && github.event.release.prerelease == false))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.preview.outputs.changed }}
+      branch: ${{ steps.preview.outputs.branch }}
+    steps:
+      # Use reviewed automation from the default branch, never scripts from a tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - run: python -m pip install -r tests/ci-requirements.txt
+      - name: Verify published release and extract only its manifest data
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,tagName > "$RUNNER_TEMP/catalog-release.json"
+          jq -e --arg tag "$RELEASE_TAG" '.isDraft == false and .isPrerelease == false and .tagName == $tag' "$RUNNER_TEMP/catalog-release.json"
+          commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$commit" origin/main
+          mkdir -p "$RUNNER_TEMP/catalog-source/dashboard"
+          git show "$commit:plugin.yaml" > "$RUNNER_TEMP/catalog-source/plugin.yaml"
+          git show "$commit:dashboard/manifest.json" > "$RUNNER_TEMP/catalog-source/dashboard/manifest.json"
+          echo "CATALOG_COMMIT=$commit" >> "$GITHUB_ENV"
+      - name: Read existing upstream catalog entry (no upstream code execution)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: NousResearch/hermes-agent
+          ref: main
+          path: upstream-catalog
+          persist-credentials: false
+          sparse-checkout: plugin-catalog/lan-control.yaml
+          sparse-checkout-cone-mode: false
+      - name: Prepare patch and English PR text without remote writes
+        id: preview
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          python -B scripts/prepare_catalog_update.py \
+            --manifest "$RUNNER_TEMP/catalog-source/plugin.yaml" \
+            --backend-manifest "$RUNNER_TEMP/catalog-source/dashboard/manifest.json" \
+            --entry upstream-catalog/plugin-catalog/lan-control.yaml \
+            --commit "$CATALOG_COMMIT" --tag "$RELEASE_TAG" --output reports/catalog-update
+          echo "changed=$(jq -r .changed reports/catalog-update/update.json)" >> "$GITHUB_OUTPUT"
+          echo "branch=$(jq -r .branch reports/catalog-update/update.json)" >> "$GITHUB_OUTPUT"
+          echo 'Preview only: fork, push, and upstream PR steps are hard-disabled.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: catalog-update-preview
+          path: reports/catalog-update/*
+          if-no-files-found: error
+          retention-days: 14
+
+  submit:
+    # HARD DISABLED by maintainer request. Enabling requires a separately
+    # authorized code change, credential setup, and review of the preview.
+    if: ${{ false && needs.prepare.outputs.changed == 'true' }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: catalog-update-preview
+          path: catalog-preview
+      - name: Create fork branch and open a draft PR (disabled)
+        env:
+          GH_TOKEN: ${{ secrets.CATALOG_PR_TOKEN }}
+          CATALOG_BRANCH: ${{ needs.prepare.outputs.branch }}
+        shell: bash
+        run: |
+          [[ -n "$GH_TOKEN" ]]
+          [[ "$CATALOG_BRANCH" =~ ^chore/lan-control-[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{12}$ ]]
+          [[ "$(gh api user --jq .login)" == andrepester ]]
+          existing="$(gh pr list --repo NousResearch/hermes-agent --base main \
+            --head "andrepester:$CATALOG_BRANCH" --state all --json url --jq '.[0].url // empty')"
+          if [[ -n "$existing" ]]; then
+            echo "A catalog PR already exists: $existing"
+            exit 0
+          fi
+          gh repo fork NousResearch/hermes-agent --clone=false --remote=false
+          [[ "$(gh api repos/andrepester/hermes-agent --jq .parent.full_name)" == NousResearch/hermes-agent ]]
+          gh repo clone NousResearch/hermes-agent catalog-work -- --depth=1 --branch main
+          gh auth setup-git
+          cd catalog-work
+          git switch -c "$CATALOG_BRANCH"
+          git apply --check ../catalog-preview/catalog-update.patch
+          git apply ../catalog-preview/catalog-update.patch
+          [[ "$(git diff --name-only)" == plugin-catalog/lan-control.yaml ]]
+          git config user.name 'Hermes LAN Control release automation'
+          git config user.email '10582472+andrepester@users.noreply.github.com'
+          git add -- plugin-catalog/lan-control.yaml
+          git commit -m "$(cat ../catalog-preview/pull-request-title.txt)"
+          git push https://github.com/andrepester/hermes-agent.git "HEAD:refs/heads/$CATALOG_BRANCH"
+          gh pr create --repo NousResearch/hermes-agent --base main \
+            --head "andrepester:$CATALOG_BRANCH" --draft \
+            --title "$(cat ../catalog-preview/pull-request-title.txt)" \
+            --body-file ../catalog-preview/pull-request.md

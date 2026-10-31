@@ -1,0 +1,28 @@
+{
+  "passed": true,
+  "hermes_version": "0.22.5",
+  "hermes_revision": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
+  "platform": "darwin",
+  "node": "v26.13.0",
+  "desktop_bundle_sha256": "3cedb804a8010c7eb6edb04e9887be65d3ca7488c2f04e22123490b8b267ff1c",
+  "plugin_files_sha256": {
+    "plugin.yaml": "70ab9b7a4b3b9aa1e4dac5a3b4ae6fc1bcdc29c05ea110d3060ccbdfacebfdb8",
+    "__init__.py": "10dd4d3d43ef053a0d91166c6cbb9c05f91e621cd10ea772c24c4c833828ffd4",
+    "desktop/plugin.js": "6385bfffb5c66421028d5873d5269b23d63fc3d79089cd6a84e6922cfa73fa81",
+    "dashboard/manifest.json": "6a1b5572db35f197f5f5273d8f213a733d15c003914007aaaaa224e4e2b1eb58",
+    "dashboard/plugin_api.py": "cd31e651c8402551c1926f8457aceb6dd8017edc93e5cc12d8fab696158723ed"
+  },
+  "checks": [
+    "package discovery",
+    "SDK activation",
+    "loopback ping",
+    "authenticated loopback HTTP",
+    "manual recheck",
+    "native settings page",
+    "config persistence",
+    "secret persistence",
+    "wake disabled",
+    "Python UDP send guard"
+  ],
+  "authorized_health_requests": 1
+}
