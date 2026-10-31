@@ -1,0 +1,146 @@
+name: Prepare release draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact reviewed 40-character SHA of main at dispatch time
+        type: string
+        required: true
+      tag:
+        description: Existing v-prefixed tag matching both manifest versions
+        type: string
+        required: true
+      validation_confirmed:
+        description: Compatibility, native lifecycle, and official Hermes validation passed for this exact commit
+        type: boolean
+        default: false
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-draft
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.verify.outputs.commit }}
+      tag: ${{ steps.verify.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify explicit approval, immutable commit, tag, and main ancestry
+        id: verify
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          VALIDATED: ${{ inputs.validation_confirmed }}
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF" == refs/heads/main ]] || exit 1
+          [[ "$VALIDATED" == true ]] || exit 1
+          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || exit 1
+          # Build the protected main snapshot that supplied this workflow, never
+          # select executable code through a dispatch input or a job output.
+          [[ "$RELEASE_COMMIT" == "$GITHUB_SHA" ]] || exit 1
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || exit 1
+          git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main
+          [[ "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" == "$RELEASE_COMMIT" ]] || exit 1
+          echo "commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.sha }}
+
+  security:
+    needs: preflight
+    uses: ./.github/workflows/security.yml
+    with:
+      ref: ${{ github.sha }}
+
+  package:
+    needs: [preflight, ci, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - run: python -m pip install -r tests/ci-requirements.txt
+      - name: Validate release metadata and build allowlisted source package
+        env:
+          RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          python - <<'PY'
+          import os, sys
+          sys.path.insert(0, 'scripts')
+          from check_package import check
+          assert os.environ['RELEASE_TAG'] == 'v' + check('.', release=True)
+          PY
+          python -B scripts/build_release.py --output release-assets --commit "$RELEASE_COMMIT"
+          cd release-assets
+          sha256sum --check SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-package
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  draft:
+    needs: [preflight, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # No plugin checkout or execution in the job holding a write token.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-package
+          path: release-assets
+      - name: Create draft only; publishing remains a separate maintainer action
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ needs.preflight.outputs.commit }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        shell: bash
+        run: |
+          cd release-assets
+          sha256sum --check SHA256SUMS
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          Native Hermes LAN Control package at commit $RELEASE_COMMIT.
+
+          Reproducible Git installation:
+          hermes plugins install andrepester/hermes-lan-control --ref $RELEASE_COMMIT
+
+          Verify downloaded assets with SHA256SUMS. The package inventory records
+          individual source hashes. The ZIP is a manual native-package artifact;
+          Hermes catalog installs use the reviewed Git commit, not this asset.
+
+          Review compatibility, release notes, and native validation evidence before
+          publishing. Catalog admission or updates require a separate upstream PR.
+          EOF
+          # GitHub applies .github/release.yml and appends changes to these notes.
+          gh release create "$RELEASE_TAG" ./* --verify-tag --target "$RELEASE_COMMIT" \
+            --generate-notes \
+            --draft --title "Hermes LAN Control $RELEASE_TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"

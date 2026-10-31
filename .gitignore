@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.env
+.env.*
+tests/harness/node_modules/
+tests/harness/.npm-cache/
+tests/harness/dist/
+.venv/
+/release-assets/
+/reports/
+/.hermes-lifecycle/
+
+# Private local project handover
+/HANDOVER.md

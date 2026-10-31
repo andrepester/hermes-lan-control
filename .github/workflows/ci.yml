@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+
+jobs:
+  python:
+    name: Python (${{ matrix.os }}, ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: '3.11'}
+          - {os: ubuntu-latest, python: '3.14'}
+          - {os: macos-latest, python: '3.14'}
+          - {os: windows-latest, python: '3.14'}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -r tests/requirements.txt
+      - run: python -B -m unittest discover -s tests -p 'test_*.py' -v
+
+  desktop:
+    name: Desktop and harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: node --check desktop/plugin.js
+      - run: node --experimental-vm-modules --test tests/test_desktop.mjs
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: tests/harness
+      - run: npm run build
+        working-directory: tests/harness
+
+  package:
+    name: Native package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - run: python -m pip install -r tests/ci-requirements.txt
+      - run: python -B scripts/check_package.py
+      - run: python -B -m unittest discover -s tests -p 'check_release.py' -v
+      - run: python -B -m unittest discover -s tests -p 'check_catalog.py' -v
+      - name: Reject private files and generated output in Git
+        shell: bash
+        run: |
+          if git ls-files | grep -E '(^|/)(HANDOVER\.md|\.env([^/]*$)|\.venv|node_modules|__pycache__|\.npm-cache|dist)(/|$)|\.py[co]$|(^|/)\.DS_Store$'; then
+            echo 'Private files or generated output must not be tracked.' >&2
+            exit 1
+          fi
+
+  lifecycle:
+    name: Hermes lifecycle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - name: Read reviewed Hermes test revision
+        id: hermes
+        shell: bash
+        run: |
+          revision="$(cat tests/hermes-revision.txt)"
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ steps.hermes.outputs.revision }}
+          path: .hermes-lifecycle/hermes-agent
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: python -m pip install -r tests/lifecycle-requirements.txt
+      - name: Offline install, activation, update, pinning, removal and desktop reconciliation
+        run: python -B tests/check_hermes_lifecycle.py --hermes-source .hermes-lifecycle/hermes-agent
+
+  gate:
+    name: CI gate
+    if: always()
+    needs: [python, desktop, package, lifecycle]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every CI job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          assert all(job['result'] == 'success' for job in results.values()), results
+          PY

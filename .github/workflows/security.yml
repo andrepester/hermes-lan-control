@@ -1,0 +1,148 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+
+jobs:
+  dependencies:
+    name: Dependency audits and SBOMs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: python -m pip install -r tests/ci-requirements.txt
+      - run: mkdir -p reports
+      - name: Audit resolved Python test dependencies and generate CycloneDX SBOM
+        run: python -m pip_audit -r tests/requirements.txt --progress-spinner off -f cyclonedx-json -o reports/python-test.cdx.json
+      - name: Audit CI tooling
+        if: ${{ !cancelled() }}
+        run: python -m pip_audit -r tests/ci-requirements.txt --progress-spinner off
+      - name: Audit lifecycle integration dependencies
+        if: ${{ !cancelled() }}
+        run: python -m pip_audit -r tests/lifecycle-requirements.txt --progress-spinner off
+      - name: Audit all harness dependencies
+        if: ${{ !cancelled() }}
+        run: npm audit --package-lock-only
+        working-directory: tests/harness
+      - name: Generate harness CycloneDX SBOM
+        if: ${{ !cancelled() }}
+        run: npm sbom --package-lock-only --sbom-format cyclonedx > ../../reports/harness.cdx.json
+        working-directory: tests/harness
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: dependency-sboms
+          path: reports/*.cdx.json
+          if-no-files-found: error
+          retention-days: 14
+
+  static-analysis:
+    name: Python security analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - run: python -m pip install -r tests/ci-requirements.txt
+      - name: Record all findings and block medium/high findings
+        run: |
+          mkdir -p reports
+          python -m bandit -r dashboard __init__.py --exit-zero -f json -o reports/bandit.json
+          python -m bandit -r dashboard __init__.py --severity-level medium
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: python-security-report
+          path: reports/bandit.json
+          if-no-files-found: error
+          retention-days: 14
+
+  secrets-and-workflows:
+    name: Secrets and workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install checksum-pinned scanner binaries
+        run: |
+          download_dir="$(mktemp -d "$RUNNER_TEMP/security-download.XXXXXX")"
+          trap 'rm -rf "$download_dir"' EXIT
+          scanner_bin="$RUNNER_TEMP/security-bin"
+          mkdir -p "$scanner_bin"
+          cd "$download_dir"
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --output gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --output actionlint.tar.gz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          sha256sum --check --strict <<'CHECKSUMS'
+          551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz
+          8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz
+          CHECKSUMS
+          tar -xzf gitleaks.tar.gz -C "$scanner_bin" gitleaks
+          tar -xzf actionlint.tar.gz -C "$scanner_bin" actionlint
+          chmod 755 "$scanner_bin/gitleaks" "$scanner_bin/actionlint"
+          echo "$scanner_bin" >> "$GITHUB_PATH"
+      - name: Scan full fetched Git history
+        run: gitleaks git . --config .gitleaks.toml --log-opts="--all" --redact --no-banner
+      - name: Scan only the committed tree
+        run: |
+          snapshot="$(mktemp -d)"
+          git archive HEAD | tar -x -C "$snapshot"
+          gitleaks dir "$snapshot" --config .gitleaks.toml --redact --no-banner
+      - name: Lint workflow expressions and shell commands
+        run: actionlint -color
+
+  gate:
+    name: Security gate
+    if: always()
+    needs: [dependencies, static-analysis, secrets-and-workflows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every security job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          assert all(job['result'] == 'success' for job in results.values()), results
+          PY

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LAN Control – isolierter React-Test</title>
+<style>
+:root { color-scheme:dark; font-family:system-ui,sans-serif; --ui-text-primary:#dcdce0; --ui-text-secondary:#b2b2b8; --ui-text-tertiary:#92929a; --ui-red:#b45f6d; --ui-green:#63947b; --ui-yellow:#c08532; --surface:#222327; --canvas:#191a1e; }
+body { margin:24px; background:var(--canvas); color:var(--ui-text-primary) }
+body.light { color-scheme:light; --ui-text-primary:#26272b; --ui-text-secondary:#494b51; --ui-text-tertiary:#72747a; --ui-red:#a75f66; --ui-green:#54846c; --surface:#e7e8eb; --canvas:#f4f5f6; }
+h1 { font-size:18px } p { font-size:13px; line-height:1.5 } .controls { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:20px 0 }
+button,select { font:inherit; font-size:12px; padding:5px 9px } #shell { border:1px solid #8885; max-width:1100px; margin:32px 0; } #shell.narrow { width:400px; max-width:100% }
+.workspace { height:220px; display:grid; place-items:center; color:var(--ui-text-tertiary); font-size:13px }
+footer { height:20px; display:flex; align-items:stretch; gap:8px; padding:0 4px; background:var(--surface); color:var(--ui-text-tertiary); font-size:11px; overflow:hidden }
+.left { flex:1; min-width:0; display:flex; align-items:center; overflow:hidden; white-space:nowrap; padding-left:6px } .right { display:flex; min-width:0; gap:2px; overflow-x:clip } #plugin { height:100%; display:flex; min-width:0; flex-shrink:1 } .native { display:inline-flex; align-items:center; flex:none; padding:0 6px; font-size:0.6875rem; color:var(--ui-text-tertiary) }
+#notice { min-height:24px } code { font-size:12px }
+.settings-row { display:grid; grid-template-columns:minmax(180px,1fr) minmax(200px,1fr); gap:16px; padding:10px 0; border-bottom:1px solid #8883; font-size:13px }
+.settings-row p { font-size:11px; color:var(--ui-text-tertiary); margin:5px 0 } .native-input { color:var(--ui-text-primary); background:var(--surface); border:1px solid #8886; border-radius:4px; padding:6px; min-width:0; width:100%; box-sizing:border-box } .native-input:disabled { opacity:.45 } @media(max-width:600px) { .settings-row { grid-template-columns:1fr } }
+</style>
+<h1>LAN Control – isolierter React-Test</h1>
+<p>Produktionskomponente mit echtem React und SDK-Mock. Ping ist simuliert, HTTP ausschließlich Loopback, UDP wird gezählt. Einstellungen und Test-Token bleiben im RAM. Keine echten Secrets eingeben. Die umgebende Leiste simuliert Hermes.</p>
+<div class="controls">
+<label>Ping <select id="ping"><option value="down">Keine Antwort</option><option value="up">Antwortet</option><option value="error">Lokaler Ping-Fehler</option></select></label>
+<label><input id="health-on" type="checkbox" checked>HTTP aktiv</label>
+<label>Health/Transport <select id="mode"><option value="unhealthy">Ungesund (503)</option><option value="healthy">Gesund (200)</option><option value="auth">Authentifizierung (401)</option><option value="timeout">HTTP-Timeout</option><option value="config">Konfigurationsfehler</option><option value="backend">Backend-Ausfall</option><option value="stale">Antwort aussetzen (veraltet nach ≤ 8 s)</option></select></label>
+<label><input id="long" type="checkbox">Langer Anzeigename</label>
+<button id="theme">Theme wechseln</button><button id="narrow">Schmale Leiste</button><button id="profile">Profil wechseln</button><button id="reload">Plugin neu laden</button><button id="disable">Deaktivieren</button><button id="enable">Aktivieren</button>
+</div>
+<div id="shell"><div class="workspace">Keine Chats oder Modellaufrufe</div><footer><span class="left">Testarbeitsbereich</span><span class="right"><span id="plugin"></span><span class="native">✓ Smart</span><span class="native">⌘</span><span class="native">v0.22.5</span></span></footer></div>
+<p id="counts"></p><p id="notice" role="status"></p>
+<details open><summary>Eigene Plugin-Einstellungen</summary><div id="settings"></div></details>
+<script type="module" src="/dist/main.js"></script></html>
