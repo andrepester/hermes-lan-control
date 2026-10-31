@@ -34,7 +34,43 @@ _revision_key = secrets.token_bytes(32)
 
 
 class ConfigError(ValueError):
-    """Nur feste, geheimnisfreie Fehlermeldungen dürfen nach außen gelangen."""
+    """Configuration validation failed; exception arguments remain internal."""
+
+
+# Public responses select a trusted catalog entry, never exception text. Keep
+# field names tied to our schema rather than a request's keys or input values.
+PUBLIC_CONFIG_ERRORS = (
+    "Plugin settings are invalid.",
+    "Enter a valid Wake-on-LAN MAC address.",
+    "Wake-on-LAN requires a unicast MAC address for a single device.",
+    "Use an HTTP or HTTPS health URL without embedded credentials or a fragment.",
+    "Display name must be no longer than 200 characters.",
+    "Timeout must be shorter than the check interval.",
+    "Bearer token contains invalid characters.",
+    "Set both the MAC address and broadcast address to enable Wake-on-LAN.",
+    "Broadcast address must be an IPv4 address.",
+    "This IPv4 address cannot be used as a Wake-on-LAN destination.",
+    "Enter a valid host to ping.",
+    "Ping requires the address of a single host.",
+    "Enter an IP address or DNS hostname for the ping target.",
+    "Enter a valid hostname for the ping target.",
+    "Some settings could not be saved. Check managed configuration.",
+    "Ping is not supported on this operating system.",
+    "The ping program is not installed on the backend.",
+    "Set a health URL before saving a token.",
+    "The saved token is not active for this profile.",
+    *(f"{key}: {reason}" for key in DEFAULTS for reason in (
+        "enter a number.", "value is outside the allowed range.",
+        "enter a whole number.", "invalid text.",
+    )),
+)
+
+
+def public_config_error(error):
+    for message in PUBLIC_CONFIG_ERRORS:
+        if error.args == (message,):
+            return message
+    return "Plugin settings are invalid."
 
 
 def number(raw, key, default, low, high, integer=False):
@@ -132,7 +168,7 @@ class Settings:
                 raise ConfigError("This IPv4 address cannot be used as a Wake-on-LAN destination.")
             broadcast = str(address)
         except ConfigError as exc:
-            wol_error = str(exc)
+            wol_error = public_config_error(exc)
         return cls(label, host, url, expected, interval, timeout, token, mac, broadcast, port, wol_error)
 
 
@@ -284,6 +320,35 @@ def ping_command(address, timeout, system):
     return [binary, *args, address]
 
 
+def windows_ping_reply(stdout, address):
+    """Read per-packet numeric fields, without decoding localized OEM text.
+
+    IPv4 echo replies include TTL=<number>; IPv6 replies include a measured
+    round-trip time. Error replies have neither. Headers/statistics have no
+    nonempty reply payload after the numeric responder address and colon.
+    """
+    target = ipaddress.ip_address(address)
+    reply = False
+    for line in stdout.splitlines():
+        match = re.search(
+            rb"(?<![0-9a-fA-F:.])([0-9a-fA-F:.]+(?:%[0-9]+)?)"
+            rb"(?::\s+|\s+[^:]*:\s+)(.+)$", line)
+        if not match:
+            continue
+        try:
+            responder = ipaddress.ip_address(match[1].decode("ascii"))
+        except ValueError:
+            continue
+        reply = True
+        payload = match[2]
+        evidence = (re.search(rb"\bTTL\s*=\s*[0-9]+\b", payload, re.I)
+                    if target.version == 4 else
+                    re.search(rb"[=<]\s*[0-9]+(?:[.,][0-9]+)?\s*[^\s0-9=<>]+", payload))
+        if responder == target and evidence:
+            return "up"
+    return "down" if reply else "error"
+
+
 async def ping_probe(settings, *, system=None, spawn=None, resolve=None):
     """Ein Paket ohne Shell; DNS, Start und Antwort teilen eine Deadline."""
     system = system or platform.system()
@@ -299,12 +364,19 @@ async def ping_probe(settings, *, system=None, spawn=None, resolve=None):
                                   env={**os.environ, "LC_ALL": "C", "LANG": "C"})
             communication = asyncio.create_task(process.communicate())
             stdout, stderr = await asyncio.shield(communication)
-            if process.returncode == 0:
+            if system == "Windows" and process.returncode in (0, 1) and not stderr.strip():
+                result = windows_ping_reply(stdout, address)
+                if result == "up" and process.returncode == 0:
+                    return "up", "The host responds to ping."
+                if result == "down":
+                    return "down", "The host does not respond to ping."
+            elif system != "Windows" and process.returncode == 0:
                 return "up", "The host responds to ping."
             # macOS: 2 = keine Antwort, Linux: 1; alle anderen Codes sind lokale Fehler.
             no_reply = 2 if system == "Darwin" else 1
             if process.returncode == no_reply and not stderr.strip():
-                if system != "Windows" or any(word in stdout.lower() for word in (b"timed out", b"zeit", b"unreachable", b"nicht erreichbar")):
+                if system != "Windows" or any(word in stdout.lower() for word in (
+                        b"request timed out", b"berschreitung der anforderung")):
                     return "down", "The host does not respond to ping."
             return "error", "Ping failed. Check the ping program, permissions, and network."
     except TimeoutError:
@@ -397,7 +469,7 @@ class Service:
         try:
             return self.load(), None
         except ConfigError as exc:
-            reason = str(exc)
+            reason = public_config_error(exc)
         except Exception:
             reason = "Could not read plugin settings or credentials for this profile."
         # Auch ungültig → gültig (mit denselben Werten) benötigt einen neuen Check.
@@ -617,7 +689,7 @@ async def save_settings_route(request: Request):
                     state.revision = uuid.uuid4().hex
                 return {"ok": True, "settings": settings_payload(*read_configuration())}
     except ConfigError as exc:
-        return {"ok": False, "outcome": "invalid", "message": str(exc)}
+        return {"ok": False, "outcome": "invalid", "message": public_config_error(exc)}
     except TimeoutError:
         return {"ok": False, "outcome": "timeout"}
     except HTTPException:

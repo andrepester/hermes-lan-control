@@ -145,6 +145,79 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["outcome"], "invalid")
                 self.assertFalse(self.writes or self.events)
 
+    async def test_validation_errors_keep_helpful_messages_without_echoing_values(self):
+        cases = (
+            ({"interval": "SYNTHETIC-SECRET"}, "interval: enter a number."),
+            ({"timeout": 5}, "Timeout must be shorter than the check interval."),
+            ({"host": "/synthetic/private/SYNTHETIC-SECRET"},
+             "Enter an IP address or DNS hostname for the ping target."),
+            ({"health_url": "https://user:SYNTHETIC-SECRET@private.invalid/health"},
+             "Use an HTTP or HTTPS health URL without embedded credentials or a fragment."),
+        )
+        for changes, expected in cases:
+            with self.subTest(changes=changes):
+                body = await self.draft(**changes)
+                body["token"] = "SYNTHETIC-NEW-TOKEN"
+                response = await self.client.post("/settings", json=body)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json(), {"ok": False, "outcome": "invalid", "message": expected})
+                self.assertNotIn("SYNTHETIC", response.text)
+                self.assertNotIn("/synthetic/private", response.text)
+        self.assertFalse(self.writes or self.events)
+
+    async def test_config_errors_from_either_read_cannot_expose_internal_details(self):
+        body = await self.draft()
+        private = "SYNTHETIC-SECRET /synthetic/private/profile.env Traceback https://private.invalid/health"
+        for failing_read in (1, 2):
+            for arguments in ((private,), ("Enter a valid host to ping.", private)):
+                with self.subTest(failing_read=failing_read, arguments=arguments):
+                    reads = 0
+                    def read():
+                        nonlocal reads
+                        reads += 1
+                        if reads == failing_read:
+                            raise api.ConfigError(*arguments)
+                        return self.scope, dict(self.raw), self.token
+                    with patch.object(api, "read_configuration", read):
+                        response = await self.client.post("/settings", json=body)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.json(), {
+                        "ok": False, "outcome": "invalid", "message": "Plugin settings are invalid.",
+                    })
+                    self.assertNotIn("SYNTHETIC", response.text)
+                    self.assertNotIn("/synthetic/private", response.text)
+                    self.assertNotIn("Traceback", response.text)
+        self.assertFalse(self.writes or self.events)
+
+    async def test_unexpected_configuration_exceptions_use_fixed_http_errors(self):
+        body = await self.draft()
+        with patch.object(api, "read_configuration", side_effect=OSError(
+                "SYNTHETIC-SECRET /synthetic/private/profile.env Traceback")):
+            loaded = await self.client.get("/settings")
+            saved = await self.client.post("/settings", json=body)
+        self.assertEqual(loaded.status_code, 503)
+        self.assertEqual(loaded.json(), {"detail": "Could not read settings."})
+        self.assertEqual(saved.status_code, 503)
+        self.assertEqual(saved.json(), {"detail": "Could not save settings."})
+        self.assertFalse(self.writes or self.events)
+
+    async def test_status_and_wol_validation_also_hide_unknown_config_error_details(self):
+        private = "SYNTHETIC-SECRET /synthetic/private/profile.env Traceback"
+        with patch.object(self.service, "load", side_effect=api.ConfigError(private)):
+            response = await self.client.get("/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reason"], "Plugin settings are invalid.")
+        self.assertFalse(response.json()["wake_allowed"])
+        self.raw.update(wol_mac="02:00:00:00:00:10", wol_broadcast="192.0.2.255")
+        with patch.object(api, "normalize_mac", side_effect=api.ConfigError(private)):
+            response = await self.client.get("/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Plugin settings are invalid.", response.json()["reason"])
+        self.assertFalse(response.json()["wake_allowed"])
+        self.assertNotIn("SYNTHETIC", response.text)
+        self.assertNotIn("/synthetic/private", response.text)
+        self.assertNotIn("Traceback", response.text)
+
     async def test_optional_http_preserves_unused_fields_and_blank_token(self):
         self.raw["expected_status"] = "ignored-value"
         body = await self.draft(health_url="")

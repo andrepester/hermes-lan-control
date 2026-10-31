@@ -34,6 +34,7 @@ export function createController(ctx, environment = {}) {
         || typeof value.revision !== 'string' || typeof value.wake_allowed !== 'boolean'
         || !Number.isFinite(value.valid_for) || value.valid_for < 0
         || !Number.isFinite(value.next_check_in) || value.next_check_in < 0
+        || !Number.isFinite(value.cooldown_remaining) || value.cooldown_remaining < 0
         || (value.wake_allowed && (!Number.isFinite(value.wake_expires_at) || value.wake_expires_at <= 0
           || !Number.isFinite(value.wake_valid_for) || value.wake_valid_for < 0))) {
       throw new Error('Invalid status response')
@@ -43,6 +44,8 @@ export function createController(ctx, environment = {}) {
     wakeUntil = started + Math.min(value.wake_valid_for || 0, 32) * 1000
     nextPoll = now() + Math.max(100, Math.min(value.next_check_in, 300) * 1000)
     if (value.wake_allowed) nextPoll = Math.min(nextPoll, Math.max(now() + 100, wakeUntil - 1000))
+    // Read a fresh snapshot at cooldown expiry; elapsed transport time cannot postpone recovery.
+    if (value.cooldown_remaining > 0) nextPoll = Math.min(nextPoll, Math.max(now() + 100, started + value.cooldown_remaining * 1000))
     emit({ ...value, rechecking: false, wake_allowed: ['unhealthy', 'degraded'].includes(value.status) && value.host_status === 'down' && value.wake_allowed && now() < Math.min(freshUntil, wakeUntil) })
     expire()
   }

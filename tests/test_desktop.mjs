@@ -123,6 +123,68 @@ test('long poll intervals renew the wake expiry and an expired action cannot sen
   assert.equal(t.controller.getSnapshot().wake_allowed, true)
 })
 
+for (const outcome of ['sent', 'send_error']) {
+  test(`long intervals refresh after ${outcome} cooldown and wait for a backend snapshot`, async () => {
+    const t = setup()
+    const longInterval = { valid_for: 300, next_check_in: 300 }
+    t.calls[0].resolve(reply('unhealthy', longInterval))
+    await flush()
+    const wake = t.controller.wake()
+    t.calls[1].resolve({ outcome, state: reply('unhealthy', {
+      ...longInterval, wake_allowed: false, cooldown_remaining: 10
+    }) })
+    await wake
+    t.advance(9999)
+    assert.equal(t.calls.length, 2)
+    assert.equal(t.controller.getSnapshot().wake_allowed, false)
+    t.advance(1)
+    assert.equal(t.calls.length, 3)
+    assert.equal(t.calls[2].path, '/status')
+    t.advance(1000)
+    await t.controller.wake()
+    assert.equal(t.calls.length, 3)
+    assert.equal(t.controller.getSnapshot().wake_allowed, false)
+    t.calls[2].resolve(reply('unhealthy', { ...longInterval, wake_expires_at: 2000 }))
+    await flush()
+    assert.equal(t.controller.getSnapshot().wake_allowed, true)
+  })
+}
+
+test('slow cooldown replies do not postpone refresh or enable wake locally', async () => {
+  const t = setup()
+  t.calls[0].resolve(reply('unhealthy', { valid_for: 300, next_check_in: 300 }))
+  await flush()
+  const wake = t.controller.wake()
+  t.advance(8000)
+  t.calls[1].resolve({ outcome: 'sent', state: reply('unhealthy', {
+    valid_for: 300, next_check_in: 300, wake_allowed: false, cooldown_remaining: 10
+  }) })
+  await wake
+  t.advance(1999)
+  assert.equal(t.calls.length, 2)
+  t.advance(1)
+  assert.equal(t.calls[2].path, '/status')
+  t.calls[2].resolve(reply('unhealthy', { cooldown_remaining: NaN }))
+  await flush()
+  assert.equal(t.controller.getSnapshot().status, 'backend_error')
+  assert.equal(t.controller.getSnapshot().wake_allowed, false)
+})
+
+test('a cooldown refresh from an old profile cannot enable wake in the new profile', async () => {
+  const t = setup()
+  t.calls[0].resolve(reply('unhealthy', {
+    valid_for: 300, next_check_in: 300, wake_allowed: false, cooldown_remaining: 10
+  }))
+  await flush()
+  t.advance(10000)
+  assert.equal(t.calls[1].path, '/status')
+  t.host.state.profile.set('b')
+  t.calls[1].resolve(reply())
+  await flush()
+  assert.equal(t.controller.getSnapshot().status, 'unknown')
+  assert.equal(t.controller.getSnapshot().wake_allowed, false)
+})
+
 test('backend failure removes green and never leaks SDK exception text', async () => {
   const t = setup()
   t.calls[0].resolve(reply('healthy'))

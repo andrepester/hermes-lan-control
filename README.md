@@ -212,7 +212,9 @@ the power icon while valid status checks continue.
   are disabled while the manual check is running.
 - Clicking the **power icon** makes the backend check again before sending.
   If the host now responds, no packet is sent. Each send attempt is followed by
-  a **10-second cooldown**, including attempts that fail to send.
+  a **10-second cooldown**, including attempts that fail to send. A status read
+  at cooldown expiry refreshes the button even with a longer check interval;
+  it is enabled again only after a valid backend response.
 - A send confirmation means the packet was handed to the local network stack.
   It does not prove delivery or change the status dot to green; subsequent checks
   determine the displayed state.

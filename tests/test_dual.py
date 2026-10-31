@@ -69,9 +69,9 @@ class DualTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FakeProcess:
-    def __init__(self, code=0, stderr=b"", pending=False):
+    def __init__(self, code=0, stderr=b"", pending=False, stdout=b""):
         self.returncode = None
-        self.code, self.stderr, self.pending = code, stderr, pending
+        self.code, self.stderr, self.pending, self.stdout = code, stderr, pending, stdout
         self.killed, self.reaped = False, False
         self.finished = asyncio.Event()
         if not pending:
@@ -81,7 +81,7 @@ class FakeProcess:
         await self.finished.wait()
         self.returncode = -9 if self.killed else self.code
         self.reaped = True
-        return b"", self.stderr
+        return self.stdout, self.stderr
 
     def kill(self):
         self.killed = True
@@ -109,6 +109,63 @@ class PingTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("secret", repr(result))
             self.assertNotIn("shell", spawn.call_args.kwargs)
             self.assertEqual(spawn.call_args.args[-1], "127.0.0.1")
+
+    async def test_windows_echo_requires_numeric_reply_evidence_from_target(self):
+        examples = [
+            ("127.0.0.1", b"Reply from 127.0.0.1: bytes=32 time<1ms TTL=128"),
+            ("127.0.0.1", "Antwort von 127.0.0.1: Bytes=32 Zeit<1ms TTL=128".encode("cp850")),
+            ("127.0.0.1", "127.0.0.1 からの応答: バイト数 =32 時間 <1ms TTL=128".encode("cp932")),
+            ("::1", b"Reply from ::1: time<1ms"),
+            ("2001:db8::1", b"Reply from 2001:0DB8:0:0:0:0:0:1: time=12ms"),
+            ("::1", "Ответ от ::1: время<1мс".encode("cp866")),
+            ("::1", "::1 からの応答: 時間 <1ms".encode("cp932")),
+        ]
+        for address, stdout in examples:
+            with self.subTest(address=address, stdout=stdout):
+                result, _ = await self.run_fake(FakeProcess(stdout=stdout), "Windows",
+                                                resolve=AsyncMock(return_value=address))
+                self.assertEqual(result[0], "up")
+
+    async def test_windows_icmp_errors_with_exit_zero_are_not_echo_success(self):
+        examples = [
+            b"Reply from 127.0.0.2: Destination host unreachable.",
+            b"Reply from 127.0.0.1: TTL expired in transit.",
+            "Antwort von 127.0.0.2: Zielhost nicht erreichbar.".encode("cp850"),
+            "Antwort von 127.0.0.1: Gültigkeitsdauer bei der Übertragung überschritten.".encode("cp850"),
+            "127.0.0.2 からの応答: 宛先ホストに到達できません。".encode("cp932"),
+        ]
+        for stdout in examples:
+            for code in (0, 1):
+                with self.subTest(stdout=stdout, code=code):
+                    result, _ = await self.run_fake(FakeProcess(code, stdout=stdout), "Windows")
+                    self.assertEqual(result[0], "down")
+                    self.assertEqual(api.combine_checks(result).status, "unhealthy")
+        result, _ = await self.run_fake(
+            FakeProcess(stdout=b"Reply from 2001:db8::2: TTL expired in transit."),
+            "Windows", resolve=AsyncMock(return_value="2001:db8::1"))
+        self.assertEqual(result[0], "down")
+
+    async def test_windows_local_errors_and_summary_without_echo_fail_closed(self):
+        for stdout, stderr in [
+            (b"", b""),
+            (b"PING: transmit failed. General failure.", b""),
+            (b"PING: transmit failed. Network unreachable.", b""),
+            ("PING: Fehler bei der Übertragung. Allgemeiner Fehler.".encode("cp850"), b""),
+            (b"PING: Zeitgeber konnte nicht gestartet werden.", b""),
+            (b"Ping statistics for 127.0.0.1:\r\n    Packets: Sent = 1, Received = 1, Lost = 0 (0% loss)", b""),
+            (b"Reply from 127.0.0.1: bytes=32 time<1ms TTL=128", b"permission denied"),
+        ]:
+            for code in (0, 1):
+                with self.subTest(stdout=stdout, stderr=stderr, code=code):
+                    result, _ = await self.run_fake(FakeProcess(code, stderr=stderr, stdout=stdout), "Windows")
+                    self.assertEqual(result[0], "error")
+                    self.assertEqual(api.combine_checks(result).status, "backend_error")
+
+    async def test_windows_request_timeouts_remain_confirmed_no_reply(self):
+        for stdout in [b"Request timed out.", "Zeitüberschreitung der Anforderung.".encode("cp850")]:
+            with self.subTest(stdout=stdout):
+                result, _ = await self.run_fake(FakeProcess(1, stdout=stdout), "Windows")
+                self.assertEqual(result[0], "down")
 
     async def test_timeout_kills_and_reaps(self):
         process = FakeProcess(pending=True)

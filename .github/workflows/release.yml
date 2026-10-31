@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       commit:
-        description: Exact reviewed 40-character commit SHA on main
+        description: Exact reviewed 40-character SHA of main at dispatch time
         type: string
         required: true
       tag:
@@ -45,25 +45,30 @@ jobs:
           VALIDATED: ${{ inputs.validation_confirmed }}
         shell: bash
         run: |
-          [[ "$VALIDATED" == true ]]
-          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          [[ "$GITHUB_REF" == refs/heads/main ]] || exit 1
+          [[ "$VALIDATED" == true ]] || exit 1
+          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || exit 1
+          # Build the protected main snapshot that supplied this workflow, never
+          # select executable code through a dispatch input or a job output.
+          [[ "$RELEASE_COMMIT" == "$GITHUB_SHA" ]] || exit 1
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || exit 1
           git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main
-          [[ "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" == "$RELEASE_COMMIT" ]]
-          echo "commit=$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
+          [[ "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" == "$RELEASE_COMMIT" ]] || exit 1
+          echo "commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
   ci:
     needs: preflight
     uses: ./.github/workflows/ci.yml
     with:
-      ref: ${{ needs.preflight.outputs.commit }}
+      ref: ${{ github.sha }}
 
   security:
     needs: preflight
     uses: ./.github/workflows/security.yml
     with:
-      ref: ${{ needs.preflight.outputs.commit }}
+      ref: ${{ github.sha }}
 
   package:
     needs: [preflight, ci, security]
@@ -72,7 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.preflight.outputs.commit }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:

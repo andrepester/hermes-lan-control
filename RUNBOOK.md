@@ -505,14 +505,43 @@ not a branch or tag. Catalog entries also require a full reviewed SHA. Updating
 a catalog pin requires a separate reviewed upstream PR; the user's update is
 performed by Hermes. Do not add a plugin self-updater.
 
-The manual release workflow requires an existing `v<manifest-version>` tag at
-the exact requested commit on `main`, explicit confirmation of the native and
+The manual release workflow runs only from `main` and requires an existing
+`v<manifest-version>` tag at the exact `main` SHA captured when dispatching it,
+explicit confirmation of the native and
 official Hermes checks, and a verified `requires_hermes` declaration. The supported
 floor is now `>=0.22.3`; the evidence and limitations are recorded in
 [the compatibility report](docs/compatibility/older-hermes.md). This does not
 authorize release publication or replace validation of the exact release commit.
 Workflow checkboxes record maintainer confirmation; they cannot prove that
 manual tests were performed. Keep supporting evidence with the release review.
+
+The commit input is a confirmation, not a checkout selector: it must equal the
+dispatch event's immutable `github.sha`. Preflight also checks the actual checkout,
+main ancestry and exact tag match. CI, security and packaging all use that event
+SHA. An older tagged ancestor is rejected, even if it was previously reviewed;
+this workflow prepares drafts for the current main snapshot only. If main moves
+after dispatch, every job still uses the captured SHA.
+
+This closes the input-to-checkout path reported by CodeQL alerts
+[#1](https://github.com/andrepester/hermes-lan-control/security/code-scanning/1)
+and [#2](https://github.com/andrepester/hermes-lan-control/security/code-scanning/2).
+The original SARIF path was preflight's commit output → package checkout →
+Python setup → pip installation. The former SHA/tag/ancestry checks constrained
+the input to main history, but allowed executing an older tree using the current
+main workflow's runtime privileges. No arbitrary fork execution was demonstrated.
+The narrowed policy removes that selection ability instead of adding a scanner
+exception.
+
+Neither the package job nor its pinned setup/upload actions enables Actions
+dependency caching; pip's local download cache is not shared between fresh hosted
+runners. This alone does not eliminate cache poisoning: manually dispatched
+main workflows retain a write-capable runtime cache token independently of
+`contents: read`, as described in GitHub's
+[cache security update](https://github.blog/changelog/2026-06-26-read-only-actions-cache-for-untrusted-triggers/).
+Only protected-main code now executes in that context. The package job receives
+no repository secrets and persists no checkout credentials. Its release artifact
+passes to a separate draft job with a write token, which never checks out or
+executes package code. Changes to these boundaries require a fresh security review.
 
 The draft uses `gh release create --generate-notes` to append GitHub-generated
 release notes after the installation and verification instructions. GitHub uses
@@ -537,7 +566,7 @@ After compatibility and publication decisions have been approved:
 2. Confirm both manifests agree on the version and that the compatibility floor
    has evidence. Review all release files and the source diff.
 3. Create and push the matching version tag only when authorized. Run
-   **Prepare release draft** from `main`, entering the full commit SHA, existing
+   **Prepare release draft** from `main`, entering its current full commit SHA, existing
    tag, and confirmation that the required validation is complete.
 4. Review the draft, generated ZIP, SHA256SUMS, inventory, SBOM artifacts, and
    notes. Publishing is a separate manual decision. No npm/PyPI publication or
