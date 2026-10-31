@@ -58,10 +58,11 @@ if the status-bar item is missing, run **Reload desktop plugins**.
 
 This uses Hermes' [native Git installation dialog](https://hermes-agent.nousresearch.com/docs/user-guide/features/plugins#one-click-install-links-desktop)
 for both components, including with a remote backend. No manual file copying or
-app rebuild is needed. The repository is still being prepared for its first
-source push; this path becomes usable once the plugin files are on GitHub.
-Version **0.2.3** has not been publicly released. The supported Hermes minimum
-is **v0.22.3** for both the backend and Desktop.
+app rebuild is needed. Git installation does not require a GitHub release.
+To install a specific reviewed revision, enter its full 40-character SHA in
+**Pin to commit**. Without a pin, installation uses the repository's default
+branch. The supported Hermes minimum is **v0.22.3** for both the backend and
+Desktop.
 
 ## Requirements
 
@@ -93,9 +94,8 @@ on 2026-10-31. Automated tests do not send real Wake-on-LAN packets. See the
 
 ## Installation from a source checkout
 
-Version **0.2.3** has not been publicly released. These instructions assume an
-existing source checkout. On the backend, place the native plugin package in
-the intended profile's plugin directory:
+These instructions assume an existing source checkout. On the backend, place
+the native plugin package in the intended profile's plugin directory:
 `$HERMES_HOME/plugins/lan-control/` (`~/.hermes/plugins/lan-control/` for the
 default home).
 
