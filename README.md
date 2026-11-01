@@ -156,7 +156,7 @@ enable Wake-on-LAN, also enter the target MAC and broadcast addresses.
 | Wake-on-LAN MAC address | Blank disables wake actions. Accepts 12 hex digits or six pairs with consistent `:` or `-` separators. Zero and multicast MACs are rejected. |
 | Broadcast address | Required for wake actions. Enter the IPv4 broadcast address for the target network; it is not detected automatically. Loopback, multicast, and unspecified addresses are rejected. |
 | UDP port | `9`; whole number from 1 to 65535. |
-| Check interval (seconds) | `60`; range 2–300. Explicitly saved values, including `5`, are kept. |
+| Check interval (seconds) | `60`; range 2–300. Explicitly saved values are kept. |
 | Timeout (seconds) | `2`; range 0.2–30, strictly shorter than the check interval. Applies to each parallel check. |
 | Health URL (optional) | Blank uses ping only. Accepts HTTP or HTTPS, without embedded credentials or a fragment. |
 | Bearer token (optional) | Blank keeps the saved token. Enter a new token to replace it. Use HTTPS when sending a token. |
