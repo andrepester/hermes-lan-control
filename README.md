@@ -156,7 +156,7 @@ enable Wake-on-LAN, also enter the target MAC and broadcast addresses.
 | Wake-on-LAN MAC address | Blank disables wake actions. Accepts 12 hex digits or six pairs with consistent `:` or `-` separators. Zero and multicast MACs are rejected. |
 | Broadcast address | Required for wake actions. Enter the IPv4 broadcast address for the target network; it is not detected automatically. Loopback, multicast, and unspecified addresses are rejected. |
 | UDP port | `9`; whole number from 1 to 65535. |
-| Check interval (seconds) | `5`; range 2–300. |
+| Check interval (seconds) | `60`; range 2–300. Explicitly saved values, including `5`, are kept. |
 | Timeout (seconds) | `2`; range 0.2–30, strictly shorter than the check interval. Applies to each parallel check. |
 | Health URL (optional) | Blank uses ping only. Accepts HTTP or HTTPS, without embedded credentials or a fragment. |
 | Bearer token (optional) | Blank keeps the saved token. Enter a new token to replace it. Use HTTPS when sending a token. |
@@ -218,6 +218,22 @@ the power icon while valid status checks continue.
 - A send confirmation means the packet was handed to the local network stack.
   It does not prove delivery or change the status dot to green; subsequent checks
   determine the displayed state.
+- After a confirmed send, a fresh check starts immediately, then every **five
+  seconds** until ping responds or **180 seconds** have elapsed since Desktop
+  received the confirmation. Slow requests delay the next start; checks do not
+  overlap or catch up on missed starts. These checks bypass the normal cache
+  and also check HTTP when configured, using the configured timeout.
+  HTTP success alone does not end the wait. Ping success returns to the normal
+  configured interval even if HTTP still fails (yellow status).
+- The display name stays visible. While waiting, the tooltip and accessible
+  description show elapsed time and separate ping/HTTP results. At the deadline,
+  the tooltip reports **No ping response within 180 seconds** and any current
+  check problem. There is no additional success notification or automatic resend.
+  Manual checks do not restart the deadline. A new explicit wake attempt replaces
+  the previous wait; only a confirmed send starts a new one.
+- The temporary wait exists only in the active Desktop controller. Profile,
+  connection, or configuration changes, disconnection, disabling, and reloading
+  discard it. Reconnection does not resume it. The saved interval is unchanged.
 - Requests have a 32-second backend budget, including waiting for another check;
   the desktop transport allows 35 seconds. A wake action that exceeds its budget
   is blocked before sending. Wake requests also carry a server-issued expiry,

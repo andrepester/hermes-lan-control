@@ -26,7 +26,7 @@ export function context(render, renderSettings) {
     rest: async (path, options = {}) => {
       if (path === '/wake') control.wakeRequests++
       if (control.transport === 'backend') throw new Error('Simulierter Backend-Ausfall')
-      if (control.transport === 'stale' && path === '/status') {
+      if (control.transport === 'stale' && ['/status', '/recheck'].includes(path)) {
         await new Promise((_, reject) => setTimeout(() => reject(new Error('Simulierter Timeout')), options.timeoutMs || 35000))
       }
       const response = await fetch('/api/plugins/lan-control' + path, {

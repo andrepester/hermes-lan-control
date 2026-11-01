@@ -85,6 +85,20 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(response.json()["has_token"])
         self.assertNotIn(self.token, response.text)
 
+    async def test_missing_interval_defaults_to_60_and_saved_intervals_round_trip(self):
+        del self.raw["interval"]
+        loaded = (await self.client.get("/settings")).json()
+        self.assertEqual(loaded["values"]["interval"], 60)
+        self.assertNotIn("interval", self.raw)
+        for interval in (5, 60, 300):
+            with self.subTest(interval=interval):
+                self.raw["interval"] = interval
+                body = await self.draft(display_name="Renamed host")
+                self.assertEqual(body["values"]["interval"], interval)
+                self.assertTrue((await self.save(body))["ok"])
+                self.assertEqual(self.raw["interval"], interval)
+                self.assertEqual((await self.client.get("/settings")).json()["values"]["interval"], interval)
+
     async def test_endpoint_and_token_update_never_expose_mismatched_credentials(self):
         body = await self.draft(health_url="https://new.invalid/health")
         body["token"] = "SYNTHETIC-NEW"
@@ -138,7 +152,7 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
         for changes in ({"host": "a..b"}, {"host": "0.0.0.0"}, {"host": ""},
                         {"display_name": "x" * 201}, {"health_url": "http://localhost:0"},
                         {"health_url": "http://a\\b"}, {"host": True}, {"interval": True},
-                        {"timeout": 5}, {"wol_port": 1.5}, {"expected_status": "999"}):
+                        {"interval": 5, "timeout": 5}, {"wol_port": 1.5}, {"expected_status": "999"}):
             with self.subTest(changes=changes):
                 result = await self.save(await self.draft(**changes))
                 self.assertFalse(result["ok"])
@@ -148,7 +162,7 @@ class SettingsApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_validation_errors_keep_helpful_messages_without_echoing_values(self):
         cases = (
             ({"interval": "SYNTHETIC-SECRET"}, "interval: enter a number."),
-            ({"timeout": 5}, "Timeout must be shorter than the check interval."),
+            ({"interval": 5, "timeout": 5}, "Timeout must be shorter than the check interval."),
             ({"host": "/synthetic/private/SYNTHETIC-SECRET"},
              "Enter an IP address or DNS hostname for the ping target."),
             ({"health_url": "https://user:SYNTHETIC-SECRET@private.invalid/health"},

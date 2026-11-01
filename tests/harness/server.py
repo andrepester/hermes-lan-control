@@ -84,12 +84,14 @@ def build_app(port):
 
     @app.post("/demo")
     def set_demo(request: DemoRequest):
+        raw = raw_settings(request.profile)
+        if request.long_label != demo["long_label"]:
+            raw["display_name"] = "Sehr langer neutraler Anzeigename für die Statusleiste" if request.long_label else "demo"
+        if request.health_on != demo["health_on"]:
+            raw["health_url"] = f"http://127.0.0.1:{port}/health" if request.health_on else ""
+        # Changing a simulated network outcome must not invalidate the real
+        # service cache or overwrite settings entered through the plugin form.
         demo.update(request.model_dump())
-        raw = raw_settings(demo["profile"])
-        raw["display_name"] = "Sehr langer neutraler Anzeigename für die Statusleiste" if demo["long_label"] else "demo"
-        raw["health_url"] = f"http://127.0.0.1:{port}/health" if demo["health_on"] else ""
-        for state in api.service.states.values():
-            state.checked = None
         return {"ok": True}
 
     @app.get("/demo")
