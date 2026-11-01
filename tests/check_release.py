@@ -63,7 +63,7 @@ class ReleaseChecks(unittest.TestCase):
 
     def test_reproducible_archive_excludes_private_and_test_files(self):
         self.allow_release()
-        for name in ("HANDOVER.md", ".env", "plugin-private.json", "tests/private.txt"):
+        for name in (".env", "plugin-private.json", "tests/private.txt"):
             path = self.root / name
             path.parent.mkdir(exist_ok=True)
             path.write_text("DO NOT SHIP")

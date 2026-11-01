@@ -81,7 +81,7 @@ jobs:
       - name: Reject private files and generated output in Git
         shell: bash
         run: |
-          if git ls-files | grep -E '(^|/)(HANDOVER\.md|\.env([^/]*$)|\.venv|node_modules|__pycache__|\.npm-cache|dist)(/|$)|\.py[co]$|(^|/)\.DS_Store$'; then
+          if git ls-files | grep -E '(^|/)(\.env([^/]*$)|\.venv|node_modules|__pycache__|\.npm-cache|dist)(/|$)|\.py[co]$|(^|/)\.DS_Store$'; then
             echo 'Private files or generated output must not be tracked.' >&2
             exit 1
           fi

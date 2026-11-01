@@ -1,7 +1,5 @@
 # Hermes LAN Control project instructions
 
-- If a local `HANDOVER.md` exists, read it first for current decisions and open work.
-  It is private working context, ignored by Git, and must not be published.
 - Keep public documentation, plugin UI, and GitHub-facing content in natural English.
 - Follow the official Hermes native plugin layout and catalog admission policy:
   https://hermes-agent.nousresearch.com/docs/developer-guide/desktop-plugin-sdk#one-package-both-sdks
@@ -11,8 +9,8 @@
   `dashboard/plugin_api.py`. Do not introduce portable `plugin.json` packaging
   for this native plugin.
 - Hermes does not prescribe a fixed README section order or a runbook location.
-  Keep user setup and the required behavior disclosures in `README.md`, developer
-  checks in `RUNBOOK.md`, and private planning in the ignored `HANDOVER.md`.
+  Keep user setup and the required behavior disclosures in `README.md` and
+  developer checks in `RUNBOOK.md`.
   Treat this documentation split as a project convention, not an upstream rule.
 - Disclose network calls, native processes, reads outside plugin data, stored
   credentials, and any background activity in the README, as required by catalog
