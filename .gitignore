@@ -11,6 +11,3 @@ tests/harness/dist/
 /release-assets/
 /reports/
 /.hermes-lifecycle/
-
-# Private local project handover
-/HANDOVER.md
