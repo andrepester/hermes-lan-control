@@ -2,7 +2,7 @@
 -r requirements.txt
 PyYAML==6.0.3
 python-dotenv==1.2.4
-rich==14.3.3
+rich==15.0.0
 ruamel.yaml==0.19.1
 truststore==0.10.5
 requests==2.34.2
