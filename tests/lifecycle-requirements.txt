@@ -7,4 +7,4 @@ ruamel.yaml==0.19.1
 truststore==0.10.5
 requests==2.34.2
 packaging==26.0
-uv==0.13.6
+uv==0.13.7
