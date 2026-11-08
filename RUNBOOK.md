@@ -415,7 +415,8 @@ release, or submits a catalog update.
 The catalog preview workflow has a prepared submission job, hard-disabled by
 an explicit `false` condition; only read-only preparation is wired to releases.
 Artifacts are retained for 14 days. Dependabot proposes weekly pip, harness npm,
-and GitHub Actions updates; updates are not automatically merged. Scanner binary
+and GitHub Actions updates; updates are not automatically merged. CodeQL action
+updates are grouped so `init` and `analyze` retain the same version. Scanner binary
 versions and archive SHA-256 pins in `security.yml` need deliberate maintenance too.
 
 Run the additional local checks in the isolated test environment:
@@ -435,7 +436,10 @@ The Security workflow downloads the official Linux x64 release binaries for
 Gitleaks and actionlint, verifies their pinned archive SHA-256 checksums before
 extracting the executables, and adds them to the job's PATH. No Go toolchain is
 required. Versions, download URLs, and checksums are declared together in
-`security.yml`; review all three when upgrading. For local checks, use release
+`security.yml`; review all three when upgrading. Both scanner downloads retry
+transient failures and fall back to the same release assets through GitHub's
+API. Update the pinned asset IDs when upgrading; both paths must pass the same
+archive checksum checks. For local checks, use release
 binaries for your operating system at the same versions. Scan Git history with
 `gitleaks git . --config .gitleaks.toml --log-opts="--all" --redact`
 and run `actionlint` against the workflows. A directory scan of the entire
