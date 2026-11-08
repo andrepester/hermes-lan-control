@@ -436,10 +436,10 @@ The Security workflow downloads the official Linux x64 release binaries for
 Gitleaks and actionlint, verifies their pinned archive SHA-256 checksums before
 extracting the executables, and adds them to the job's PATH. No Go toolchain is
 required. Versions, download URLs, and checksums are declared together in
-`security.yml`; review all three when upgrading. The Gitleaks download retries
-transient failures and falls back to the same release asset through GitHub's
-API. Update its pinned asset ID when upgrading; both paths must pass the same
-archive checksum check. For local checks, use release
+`security.yml`; review all three when upgrading. Both scanner downloads retry
+transient failures and fall back to the same release assets through GitHub's
+API. Update the pinned asset IDs when upgrading; both paths must pass the same
+archive checksum checks. For local checks, use release
 binaries for your operating system at the same versions. Scan Git history with
 `gitleaks git . --config .gitleaks.toml --log-opts="--all" --redact`
 and run `actionlint` against the workflows. A directory scan of the entire
