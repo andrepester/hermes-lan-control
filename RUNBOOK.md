@@ -415,7 +415,8 @@ release, or submits a catalog update.
 The catalog preview workflow has a prepared submission job, hard-disabled by
 an explicit `false` condition; only read-only preparation is wired to releases.
 Artifacts are retained for 14 days. Dependabot proposes weekly pip, harness npm,
-and GitHub Actions updates; updates are not automatically merged. Scanner binary
+and GitHub Actions updates; updates are not automatically merged. CodeQL action
+updates are grouped so `init` and `analyze` retain the same version. Scanner binary
 versions and archive SHA-256 pins in `security.yml` need deliberate maintenance too.
 
 Run the additional local checks in the isolated test environment:
