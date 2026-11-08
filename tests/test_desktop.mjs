@@ -33,7 +33,7 @@ function setup() {
   }
   const host = { state: { profile: atom('a'), connectionId: atom('local'), gateway: atom('open') }, notify: value => notices.push(value) }
   const ctx = {
-    rest: (path, options) => new Promise((resolve, reject) => calls.push({ path, options, resolve, reject })),
+    rest: (path, options) => new Promise((resolve, reject) => calls.push({ path, options, resolve, reject, started: time })),
     onEvent: (name, fn) => { events.set(name, fn); return () => events.delete(name) },
     setInterval: fn => { intervals.add(fn); return () => intervals.delete(fn) },
     onDispose: fn => disposers.push(fn)
@@ -123,7 +123,7 @@ test('long poll intervals renew the wake expiry and an expired action cannot sen
   assert.equal(t.controller.getSnapshot().wake_allowed, true)
 })
 
-for (const outcome of ['sent', 'send_error']) {
+for (const outcome of ['send_error']) {
   test(`long intervals refresh after ${outcome} cooldown and wait for a backend snapshot`, async () => {
     const t = setup()
     const longInterval = { valid_for: 300, next_check_in: 300 }
@@ -156,7 +156,7 @@ test('slow cooldown replies do not postpone refresh or enable wake locally', asy
   await flush()
   const wake = t.controller.wake()
   t.advance(8000)
-  t.calls[1].resolve({ outcome: 'sent', state: reply('unhealthy', {
+  t.calls[1].resolve({ outcome: 'send_error', state: reply('unhealthy', {
     valid_for: 300, next_check_in: 300, wake_allowed: false, cooldown_remaining: 10
   }) })
   await wake
@@ -327,7 +327,7 @@ test('manual check failure, disconnect, disposal and pending wake never send ext
   const wake = t.controller.wake()
   await t.controller.recheck()
   assert.equal(t.calls.length, 2)
-  t.calls[1].resolve({ outcome: 'sent', state: reply() }); await wake
+  t.calls[1].resolve({ outcome: 'blocked', state: reply() }); await wake
   const check = t.controller.recheck()
   t.calls[2].reject(new Error('PRIVATE-SECRET')); await check
   assert.equal(t.controller.getSnapshot().status, 'backend_error')
@@ -497,4 +497,232 @@ test('transport failure preserves drafts without echoing a secret exception', as
   assert.equal(t.form.getSnapshot().token, 'DRAFT-SECRET')
   assert.doesNotMatch(t.form.getSnapshot().message, /DRAFT-SECRET/)
   assert.match(t.form.getSnapshot().message, /Could not verify/)
+})
+
+const normalReply = (status = 'unhealthy', extra = {}) => reply(status, {
+  valid_for: 303, next_check_in: 300, http_status: 'disabled', ...extra
+})
+async function fastSetup(snapshot = normalReply('unhealthy', { wake_allowed: false, cooldown_remaining: 10 })) {
+  const t = setup()
+  t.calls[0].resolve(normalReply()); await flush()
+  const wake = t.controller.wake()
+  t.calls[1].resolve({ outcome: 'sent', state: snapshot }); await wake
+  return t
+}
+
+test('sent immediately forces a new check, ignores the pre-send snapshot, and uses five-second start cadence', async () => {
+  const t = await fastSetup(normalReply('healthy'))
+  assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+  assert.equal(t.calls[2].path, '/recheck')
+  assert.equal(t.calls[2].options.method, 'POST')
+  assert.equal(t.calls[2].options.timeoutMs, 35000)
+  t.advance(2000)
+  t.calls[2].resolve(normalReply('degraded', { host_status: 'down', http_status: 'healthy' })); await flush()
+  assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+  const tree = Status({ controller: t.controller })
+  assert.equal(tree.children[1].children[1].children[0], 'demo')
+  assert.equal(tree.children[1].children[0].props['data-degraded'], 'true')
+  assert.match(tree.props.title, /Waiting for a ping response \(2 of 180 seconds elapsed\)/)
+  assert.match(tree.children[1].props['aria-description'], /Ping: down. HTTP: healthy/)
+  t.advance(2999); assert.equal(t.calls.length, 3)
+  t.advance(1); assert.equal(t.calls[3].started, 5000)
+  t.advance(30000); assert.equal(t.calls.length, 4)
+  t.calls[3].resolve(normalReply()); await flush()
+  assert.equal(t.calls.length, 5)
+  assert.equal(t.calls[4].started, 35000)
+  t.calls[4].resolve(normalReply()); await flush()
+  assert.equal(t.calls.length, 5) // No catch-up burst.
+  assert.equal(t.calls.filter(call => call.path === '/wake').length, 1)
+})
+
+for (const http_status of ['disabled', 'healthy', 'unhealthy']) {
+  test(`fresh ping up ends waiting with HTTP ${http_status}, preserves name, and resumes normal checks`, async () => {
+    const t = await fastSetup()
+    const status = http_status === 'unhealthy' ? 'degraded' : 'healthy'
+    t.calls[2].resolve(normalReply(status, { host_status: 'up', http_status })); await flush()
+    assert.equal(t.controller.getSnapshot().wake_phase, '')
+    assert.equal(t.controller.getSnapshot().status, status)
+    assert.equal(t.controller.getSnapshot().label, 'demo')
+    assert.equal(t.notices.length, 1)
+    t.advance(299999); assert.equal(t.calls.length, 3)
+    t.advance(1); assert.equal(t.calls[3].path, '/status')
+    t.calls[3].resolve(normalReply()); await flush()
+    assert.equal(t.controller.getSnapshot().status, 'unhealthy')
+  })
+}
+
+test('deadline uses sent receipt, expires while a request is pending, and late ping cannot undo timeout', async () => {
+  const t = setup()
+  t.calls[0].resolve(normalReply()); await flush()
+  const wake = t.controller.wake()
+  t.advance(20000)
+  t.calls[1].resolve({ outcome: 'sent', state: normalReply('unhealthy', { wake_allowed: false }) }); await wake
+  t.advance(179999)
+  assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+  assert.equal(t.calls.length, 3)
+  t.advance(1)
+  assert.equal(t.controller.getSnapshot().wake_phase, 'timed_out')
+  assert.match(Status({ controller: t.controller }).props.title, /No ping response within 180 seconds/)
+  t.calls[2].resolve(normalReply('healthy')); await flush()
+  assert.equal(t.controller.getSnapshot().wake_phase, 'timed_out')
+  assert.equal(t.notices.length, 1)
+  assert.equal(t.calls.length, 3)
+  t.advance(300000)
+  assert.equal(t.calls[3].path, '/status')
+})
+
+test('transport and malformed rechecks retry within the deadline and report a check problem at timeout', async () => {
+  const t = await fastSetup()
+  t.calls[2].reject(new Error('PRIVATE')); await flush()
+  assert.equal(t.controller.getSnapshot().status, 'backend_error')
+  assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+  t.advance(5000)
+  assert.equal(t.calls[3].path, '/recheck')
+  t.calls[3].resolve({ host_status: 'up' }); await flush()
+  assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+  t.advance(175000)
+  const tooltip = Status({ controller: t.controller }).props.title
+  assert.match(tooltip, /No ping response within 180 seconds/)
+  assert.match(tooltip, /Cannot reach the plugin backend/)
+  assert.doesNotMatch(tooltip, /PRIVATE/)
+  assert.equal(t.calls.at(-1).path, '/status')
+})
+
+for (const outcome of ['blocked', 'send_error', 'transport_error']) {
+  test(`${outcome} does not start fast checks`, async () => {
+    const t = setup()
+    t.calls[0].resolve(normalReply()); await flush()
+    const wake = t.controller.wake()
+    if (outcome === 'transport_error') t.calls[1].reject(new Error('PRIVATE'))
+    else t.calls[1].resolve({ outcome, state: normalReply('unhealthy', { wake_allowed: false, cooldown_remaining: 10 }) })
+    await wake
+    assert.equal(t.controller.getSnapshot().wake_phase, '')
+    assert.equal(t.calls.length, 2)
+  })
+}
+
+test('manual recheck queues behind fast checks without overlap or extending the deadline', async () => {
+  const t = await fastSetup()
+  t.advance(170000)
+  const manual = t.controller.recheck()
+  await t.controller.recheck()
+  assert.equal(t.calls.length, 3)
+  t.calls[2].resolve(normalReply('healthy')); await flush()
+  assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+  assert.equal(t.calls[3].path, '/recheck')
+  t.calls[3].resolve(normalReply()); await manual
+  t.advance(10000)
+  assert.equal(t.controller.getSnapshot().wake_phase, 'timed_out')
+  assert.equal(t.calls.length, 4)
+})
+
+test('post-send check waits for the superseded GET transport and discards its ping success', async () => {
+  const t = setup()
+  t.calls[0].resolve(reply()); await flush()
+  t.advance(5000)
+  const wake = t.controller.wake()
+  t.calls[2].resolve({ outcome: 'sent', state: normalReply('unhealthy', { wake_allowed: false }) }); await wake
+  assert.equal(t.calls.length, 3)
+  t.calls[1].resolve(normalReply('healthy')); await flush()
+  assert.equal(t.controller.getSnapshot().status, 'unhealthy')
+  assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+  assert.equal(t.calls[3].path, '/recheck')
+})
+
+for (const change of ['profile', 'connectionId', 'source', 'settings', 'disconnect', 'dispose', 'revision']) {
+  test(`${change} discards waiting and late replies cannot restore it`, async () => {
+    const t = await fastSetup()
+    if (change === 'source') t.switchSource()
+    else if (change === 'settings') t.events.get('plugin.lan-control.settings.changed')()
+    else if (change === 'disconnect') t.host.state.gateway.set('closed')
+    else if (change === 'dispose') t.controller.dispose()
+    else if (change !== 'revision') t.host.state[change].set('new')
+    t.calls[2].resolve(normalReply('healthy', { revision: change === 'revision' ? 'r2' : 'r1' })); await flush()
+    assert.equal(t.controller.getSnapshot().wake_phase, '')
+    assert.equal(t.notices.length, 1)
+    if (change === 'disconnect') {
+      t.host.state.gateway.set('open')
+      assert.equal(t.calls.at(-1).path, '/status')
+    }
+  })
+}
+
+test('disconnect after a check error still clears the waiting phase', async () => {
+  const t = await fastSetup()
+  t.calls[2].reject(new Error('failure')); await flush()
+  t.host.state.gateway.set('closed')
+  assert.equal(t.controller.getSnapshot().wake_phase, '')
+})
+
+for (const outcome of ['sent', 'blocked', 'send_error']) {
+  test(`another explicit wake replaces waiting only after a new sent result (${outcome})`, async () => {
+    const t = await fastSetup()
+    t.calls[2].resolve(normalReply('unhealthy', { wake_allowed: false, cooldown_remaining: 10 })); await flush()
+    t.advance(5000)
+    t.calls[3].resolve(normalReply('unhealthy', { wake_allowed: false, cooldown_remaining: 5 })); await flush()
+    assert.equal(t.controller.getSnapshot().wake_allowed, false)
+    t.advance(5000)
+    t.calls[4].resolve(normalReply()); await flush()
+    assert.equal(t.controller.getSnapshot().wake_allowed, true)
+    const second = t.controller.wake()
+    assert.equal(t.controller.getSnapshot().wake_phase, '')
+    t.calls[5].resolve({ outcome, state: normalReply('unhealthy', { wake_allowed: false, cooldown_remaining: 10 }) }); await second
+    assert.equal(t.controller.getSnapshot().wake_phase, outcome === 'sent' ? 'waiting' : '')
+    assert.equal(t.controller.getSnapshot().wake_elapsed, 0)
+    assert.equal(t.calls.filter(call => call.path === '/wake').length, 2)
+    if (outcome === 'sent') {
+      t.advance(175000)
+      assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+      t.advance(5000)
+      assert.equal(t.controller.getSnapshot().wake_phase, 'timed_out')
+    }
+  })
+}
+
+const changedReply = () => ({ status: 'unknown', reason: 'Settings changed. Check again.',
+  label: 'LAN Control', wake_allowed: false, revision: '', valid_for: 0, next_check_in: 0.1, cooldown_remaining: 0 })
+const expiredReply = () => ({ ...changedReply(), status: 'backend_error',
+  reason: 'The request timed out. Check again.', next_check_in: 5 })
+
+test('revisionless backend timeout snapshots retain the configured name and retry, while invalid configuration clears waiting', async () => {
+  const t = await fastSetup()
+  t.calls[2].resolve(expiredReply()); await flush()
+  assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+  assert.equal(t.controller.getSnapshot().label, 'demo')
+  assert.equal(Status({ controller: t.controller }).children[1].children[1].children[0], 'demo')
+  t.advance(5000)
+  assert.equal(t.calls[3].path, '/recheck')
+  t.calls[3].resolve(reply('unknown', { host_status: 'unknown' })); await flush()
+  assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+  t.advance(5000)
+  t.calls[4].resolve(reply('config_error', { revision: '', wake_allowed: false })); await flush()
+  assert.equal(t.controller.getSnapshot().wake_phase, '')
+})
+
+test('stale and internal-error ping-up snapshots cannot finish waiting', async () => {
+  const t = await fastSetup()
+  t.calls[2].resolve(normalReply('healthy', { valid_for: 0 })); await flush()
+  assert.equal(t.controller.getSnapshot().status, 'stale')
+  assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+  t.advance(5000)
+  t.calls[3].resolve(normalReply('backend_error', { host_status: 'up', http_status: 'backend_error' })); await flush()
+  assert.equal(t.controller.getSnapshot().wake_phase, 'waiting')
+})
+
+
+test('backend configuration-change sentinel discards waiting and promptly reads the new context', async () => {
+  const t = await fastSetup()
+  t.calls[2].resolve(changedReply()); await flush()
+  assert.equal(t.controller.getSnapshot().wake_phase, '')
+  assert.equal(t.controller.getSnapshot().wake_elapsed, 0)
+  assert.equal(t.controller.getSnapshot().wake_allowed, false)
+  assert.doesNotMatch(Status({ controller: t.controller }).props.title, /Waiting for a ping response/)
+  t.advance(99)
+  assert.equal(t.calls.length, 3)
+  t.advance(1)
+  assert.equal(t.calls[3].path, '/status')
+  t.calls[3].resolve(normalReply('healthy', { revision: 'r2', label: 'New target' })); await flush()
+  assert.equal(t.controller.getSnapshot().label, 'New target')
+  assert.equal(t.controller.getSnapshot().wake_phase, '')
+  assert.equal(t.notices.length, 1)
 })

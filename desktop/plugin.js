@@ -3,7 +3,7 @@ import { createElement as h, useSyncExternalStore } from 'react'
 
 const initial = (reason = 'Not checked yet.') => ({
   label: 'LAN Control', status: 'unknown', reason, wake_allowed: false,
-  revision: '', valid_for: 0, next_check_in: 5, cooldown_remaining: 0, rechecking: false
+  revision: '', valid_for: 0, next_check_in: 60, cooldown_remaining: 0, rechecking: false
 })
 
 // Reiner Controller mit injizierbarer Uhr/SDK: dieselbe Logik läuft in Desktop und Tests.
@@ -13,18 +13,21 @@ export function createController(ctx, environment = {}) {
   const now = environment.now || (() => performance.now())
   const listeners = new Set()
   let state = initial(), scope = '', generation = 0, disposed = false
-  let busy = false, waking = false, rechecking = false, freshUntil = 0, wakeUntil = 0, nextPoll = 0
-  const scopeKey = () => `${epoch()}:${app.state.profile.get()}`
+  let busy = null, waking = false, rechecking = false, freshUntil = 0, wakeUntil = 0, nextPoll = 0
+  let phase = null, checkSequence = 0
+  const scopeKey = () => JSON.stringify([epoch(), app.state.connectionId.get(), app.state.profile.get()])
   const emit = value => {
     if (disposed) return
-    state = value
+    state = { ...value, wake_phase: phase?.status || '', wake_elapsed: phase ? Math.min(180, Math.floor((now() - phase.started) / 1000)) : 0 }
     for (const listener of listeners) listener()
   }
   const current = (version, key) => !disposed && version === generation && key === scopeKey()
   function invalidate(reason = 'Not checked yet.') {
     generation++
     scope = scopeKey()
-    busy = waking = rechecking = false
+    busy = null
+    waking = rechecking = false
+    phase = null
     freshUntil = wakeUntil = nextPoll = 0
     emit(initial(reason))
   }
@@ -39,6 +42,12 @@ export function createController(ctx, environment = {}) {
           || !Number.isFinite(value.wake_valid_for) || value.wake_valid_for < 0))) {
       throw new Error('Invalid status response')
     }
+    // Revisionless backend errors are transient and cannot supply a new target label.
+    if (value.status === 'backend_error' && !value.revision) value = { ...value, label: state.label }
+    // The backend's revisionless unknown snapshot invalidates a changed configuration;
+    // its revisionless budget-error snapshot instead permits retrying the same target.
+    if (phase && (value.status === 'config_error' || (value.status === 'unknown' && !value.revision)
+        || (value.revision && value.revision !== phase.revision))) phase = null
     // Request-Start statt Empfang: langsame Transporte verlängern niemals das Alter.
     freshUntil = started + Math.min(value.valid_for, 331) * 1000
     wakeUntil = started + Math.min(value.wake_valid_for || 0, 32) * 1000
@@ -60,46 +69,87 @@ export function createController(ctx, environment = {}) {
     nextPoll = now() + 5000
     emit({ ...initial('Cannot reach the plugin backend.'), label: state.label, status: 'backend_error' })
   }
-  async function poll(force = false) {
-    if (disposed || busy || waking || app.state.gateway.get() !== 'open') return
-    const version = generation, key = scopeKey(), started = now()
-    busy = true
-    try {
-      const result = await ctx.rest(force ? '/recheck' : '/status', { ...(force ? { method: 'POST' } : {}), timeoutMs: 35000 })
-      if (current(version, key)) adopt(result, started)
-    } catch {
-      if (current(version, key)) failed()
-    } finally {
-      if (current(version, key)) busy = false
-    }
+  // All status checks share one transport slot. A manual check can supersede
+  // a cached read's result, but waits for its transport before forcing a probe.
+  function poll(force = false) {
+    if (disposed || busy || waking || app.state.gateway.get() !== 'open') return Promise.resolve()
+    const version = generation, key = scopeKey(), started = now(), sequence = ++checkSequence
+    const checkedPhase = phase?.status === 'waiting' ? phase : null
+    if (checkedPhase) checkedPhase.next = started + 5000
+    const flight = { promise: null }
+    busy = flight
+    flight.promise = (async () => {
+      try {
+        const result = await ctx.rest(force ? '/recheck' : '/status', { ...(force ? { method: 'POST' } : {}), timeoutMs: 35000 })
+        if (current(version, key) && sequence === checkSequence) {
+          expirePhase()
+          adopt(result, started)
+          if (checkedPhase && phase === checkedPhase && phase.status === 'waiting'
+              && result.host_status === 'up' && ['healthy', 'degraded'].includes(state.status)) {
+            phase = null
+            emit(state)
+          } else if (!checkedPhase && phase?.status === 'timed_out') {
+            phase = null
+            emit(state)
+          }
+        }
+      } catch {
+        if (current(version, key) && sequence === checkSequence) failed()
+      } finally {
+        if (busy === flight) {
+          busy = null
+          if (!rechecking) tick()
+        }
+      }
+    })()
+    return flight.promise
   }
   async function recheck() {
     if (disposed) return
     if (scope !== scopeKey()) invalidate('Profile or connection changed. Checking again.')
     if (app.state.gateway.get() !== 'open') { tick(); return }
     if (waking || rechecking) return
-    // Ein alter Cache-GET darf den manuellen Check weder verschlucken noch
-    // anschließend dessen frisches Ergebnis überschreiben.
-    generation++
     const version = generation, key = scopeKey()
-    busy = false
+    checkSequence++
     rechecking = true
     emit({ ...state, rechecking: true, wake_allowed: false })
-    try { await poll(true) }
-    finally { if (current(version, key)) rechecking = false }
+    try {
+      if (busy) await busy.promise
+      if (current(version, key)) {
+        expirePhase()
+        await poll(true)
+      }
+    } finally {
+      if (current(version, key)) {
+        rechecking = false
+        emit({ ...state, rechecking: false })
+        tick()
+      }
+    }
+  }
+  function expirePhase() {
+    if (phase?.status === 'waiting' && now() >= phase.started + 180000) {
+      phase.status = 'timed_out'
+      emit(state)
+    }
   }
   function tick() {
     if (disposed) return
     if (scope !== scopeKey()) invalidate('Profile or connection changed. Checking again.')
     if (app.state.gateway.get() !== 'open') {
-      if (state.status !== 'backend_error') {
+      if (state.status !== 'backend_error' || phase || busy || waking || rechecking) {
         invalidate('The plugin backend is disconnected.')
         emit({ ...state, status: 'backend_error' })
       }
       return
     }
+    expirePhase()
     expire()
-    if (now() >= nextPoll) void poll()
+    if (phase && state.wake_elapsed !== Math.min(180, Math.floor((now() - phase.started) / 1000))) emit(state)
+    if (rechecking) return
+    if (phase?.status === 'waiting') {
+      if (now() >= phase.next) void poll(true)
+    } else if (now() >= nextPoll) void poll()
   }
   async function wake() {
     tick()
@@ -107,7 +157,7 @@ export function createController(ctx, environment = {}) {
     // Ein laufendes GET darf den Klick nicht verschlucken oder seine Antwort später
     // über den Versandzustand schreiben. Das Backend serialisiert GET und POST.
     generation++
-    busy = false
+    phase = null
     const version = generation, key = scopeKey(), started = now(), revision = state.revision, expires_at = state.wake_expires_at
     waking = true
     emit({ ...state, wake_allowed: false, reason: 'Checking the host before sending Wake-on-LAN…' })
@@ -115,7 +165,9 @@ export function createController(ctx, environment = {}) {
       const result = await ctx.rest('/wake', { method: 'POST', body: { revision, expires_at }, timeoutMs: 35000 })
       if (!current(version, key)) return
       adopt(result.state, started)
-      if (result.outcome === 'sent') {
+      if (result.outcome === 'sent' && state.revision === revision) {
+        phase = { status: 'waiting', started: now(), next: now(), revision: state.revision }
+        emit(state)
         app.notify({ kind: 'info', message: 'Wake-on-LAN packet sent to the local network. Waiting for the host to respond.' })
       } else if (result.outcome === 'send_error') {
         app.notify({ kind: 'error', message: 'Could not send the Wake-on-LAN packet.' })
@@ -125,17 +177,20 @@ export function createController(ctx, environment = {}) {
     } catch {
       if (current(version, key)) failed()
     } finally {
-      if (current(version, key)) waking = false
+      if (current(version, key)) { waking = false; tick() }
     }
   }
   const cleanups = [
     app.state.profile.subscribe(() => { invalidate(); tick() }),
+    app.state.connectionId.subscribe(() => { invalidate(); tick() }),
     app.state.gateway.subscribe(tick),
     ctx.onEvent('plugin.lan-control.settings.changed', () => { invalidate('Settings changed. Checking again.'); tick() }),
     ctx.setInterval(tick, 250)
   ]
   function dispose() {
     if (disposed) return
+    phase = null
+    state = { ...state, wake_phase: '', wake_elapsed: 0 }
     disposed = true
     generation++
     cleanups.forEach(cleanup => cleanup())
@@ -165,17 +220,20 @@ const css = `
 export function Status({ controller }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
   const healthy = state.status === 'healthy'
-  const statusName = `${state.label}: ${healthy ? 'Checks passed' : state.status === 'degraded' ? 'Host and health checks have different results' : 'Checks have not passed'}. ${state.reason}`
-  return h('span', { className: 'lan-control', title: `${state.label} — ${state.reason}` },
+  const waiting = state.wake_phase === 'waiting' ? ` Waiting for a ping response (${state.wake_elapsed} of 180 seconds elapsed).`
+    : state.wake_phase === 'timed_out' ? ' No ping response within 180 seconds.' : ''
+  const details = `${state.reason}${waiting}${state.wake_phase ? ` Ping: ${state.host_status || 'unknown'}. HTTP: ${state.http_status || 'unknown'}.` : ''}`
+  const statusName = `${state.label}: ${healthy ? 'Checks passed' : state.status === 'degraded' ? 'Host and health checks have different results' : 'Checks have not passed'}. ${details}`
+  return h('span', { className: 'lan-control', title: `${state.label} — ${details}` },
     h('style', null, css),
-    h('button', { type: 'button', className: 'lan-control__check', 'aria-label': `${state.label}: check again`,
+    h('button', { type: 'button', className: 'lan-control__check', 'aria-label': `${state.label}: check again`, 'aria-description': statusName,
       'aria-busy': Boolean(state.rechecking), disabled: Boolean(state.rechecking),
       title: `${statusName} — Click to check again`, onClick: () => void controller.recheck() },
       h('span', { className: 'lan-control__dot', 'data-healthy': String(healthy), 'data-degraded': String(state.status === 'degraded'), role: 'img', 'aria-label': statusName }),
       h('span', { className: 'lan-control__label' }, state.label)),
-    h('span', { title: `Wake-on-LAN — ${state.reason}`, style: { display: 'inline-flex', flex: 'none' } },
+    h('span', { title: `Wake-on-LAN — ${details}`, style: { display: 'inline-flex', flex: 'none' } },
       h('button', { type: 'button', className: 'lan-control__power', 'aria-label': 'Wake-on-LAN',
-        title: `Wake-on-LAN — ${state.reason}`, disabled: !state.wake_allowed, onClick: () => void controller.wake() },
+        title: `Wake-on-LAN — ${details}`, disabled: !state.wake_allowed, onClick: () => void controller.wake() },
       h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
         strokeWidth: 1.7, strokeLinecap: 'round', 'aria-hidden': true },
         h('path', { d: 'M12 3v9M6.34 5.66a8 8 0 1 0 11.32 0' })))))

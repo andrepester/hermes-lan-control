@@ -31,8 +31,16 @@ class ValidationTests(unittest.TestCase):
     def test_defaults_and_label(self):
         value = settings()
         self.assertEqual((value.label, value.interval, value.timeout, value.expected, value.port),
-                         ("localhost", 5, 2, 200, 9))
+                         ("localhost", 60, 2, 200, 9))
         self.assertEqual(settings(display_name=" Test ").label, "Test")
+
+    def test_explicit_intervals_are_preserved(self):
+        self.assertEqual(api.DEFAULTS["interval"], 60)
+        self.assertEqual(api.Settings("demo", "target.invalid", "").interval, 60)
+        for interval in (2, 5, 60, 300):
+            with self.subTest(interval=interval):
+                self.assertEqual(settings(interval=interval, timeout=1).interval, interval)
+        self.assertEqual(settings(timeout=30).timeout, 30)
 
     def test_invalid_health_settings(self):
         for change in ({"health_url": ""}, {"health_url": "file:///tmp/a"},
@@ -41,7 +49,7 @@ class ValidationTests(unittest.TestCase):
                        {"health_url": "http://[broken"}, {"health_url": "http://localhost:0"},
                        {"health_url": "http://a\nb"}, {"health_url": "http://a\\b"},
                        {"interval": True}, {"interval": float("nan")}, {"interval": 301},
-                       {"timeout": 5}, {"timeout": 0}, {"expected_status": 200.5},
+                       {"interval": 5, "timeout": 5}, {"timeout": 0}, {"expected_status": 200.5},
                        {"expected_status": 600}, {"display_name": "x" * 201}):
             with self.subTest(change=change), self.assertRaises(api.ConfigError):
                 settings(**change)
@@ -95,7 +103,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         values = await asyncio.gather(*(self.service.status() for _ in range(12)))
         self.assertEqual(self.checks, 1)
         self.assertTrue(all(value == values[0] for value in values))
-        self.now += 5
+        self.now += 59.9
+        await self.service.status()
+        self.assertEqual(self.checks, 1)
+        self.now += 0.1
         await self.service.status()
         self.assertEqual(self.checks, 2)
 
@@ -135,6 +146,33 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.checks, 2)
                 self.assertFalse(self.sent)
 
+    async def test_post_wake_rechecks_bypass_long_cache_and_preserve_normal_interval(self):
+        for interval in (60, 300):
+            with self.subTest(interval=interval):
+                self.config = settings(interval=interval)
+                self.result = ("unhealthy", "Simulated down")
+                app = FastAPI()
+                app.include_router(api.router)
+                with patch.object(api, "service", self.service):
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                        snapshot = (await client.get("/status")).json()
+                        before_checks, before_sent = self.checks, len(self.sent)
+                        wake = (await client.post("/wake", json={"revision": snapshot["revision"], "expires_at": snapshot["wake_expires_at"]})).json()
+                        self.assertEqual(wake["outcome"], "sent")
+                        self.assertEqual(self.checks, before_checks + 1)
+                        for elapsed in (0, 5, 5):
+                            self.now += elapsed
+                            await client.post("/recheck")
+                        self.assertEqual(self.checks, before_checks + 4)
+                        self.result = ("healthy", "Fresh ping response")
+                        self.now += 5
+                        self.assertEqual((await client.get("/status")).json()["host_status"], "down")
+                        fresh = (await client.post("/recheck")).json()
+                        self.assertEqual(fresh["host_status"], "up")
+                        self.assertEqual(fresh["next_check_in"], interval)
+                        self.assertEqual(self.config.interval, interval)
+                        self.assertEqual(len(self.sent), before_sent + 1)
+
     async def test_becomes_healthy_before_wake(self):
         status = await self.service.status()
         self.result = ("healthy", "Gesund.")
@@ -145,7 +183,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_auth_missing_wol_unknown_and_stale_block(self):
         for state in ("healthy", "auth_error", "backend_error"):
             self.result = (state, "Test")
-            self.now += 6
+            self.now += 61
             status = await self.service.status()
             await self.service.wake(status["revision"])
         self.result = ("unhealthy", "Test")
@@ -154,7 +192,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         await self.service.wake(status["revision"])
         self.config = settings()
         status = await self.service.status()
-        self.now += 9
+        self.now += 64
         reply = await self.service.wake(status["revision"])
         self.assertEqual(reply["state"]["status"], "stale")
         self.assertFalse(self.sent)

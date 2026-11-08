@@ -30,7 +30,7 @@ config_schema:
     description: "Destination UDP port (1–65535)."
   interval:
     type: float
-    default: 5
+    default: 60
     description: "Time between checks, in seconds (2–300)."
   timeout:
     type: float
