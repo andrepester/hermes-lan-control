@@ -419,6 +419,15 @@ and GitHub Actions updates; updates are not automatically merged. CodeQL action
 updates are grouped so `init` and `analyze` retain the same version. Scanner binary
 versions and archive SHA-256 pins in `security.yml` need deliberate maintenance too.
 
+CodeQL uses the official per-language Linux bundles from CLI v2.27.4. The workflow
+downloads them through GitHub's public release-asset API with bounded retries,
+verifies each pinned SHA-256 checksum, and passes the local archive to the
+supported `init` action's `tools` input. This avoids the release download URLs
+that repeatedly returned HTTP 504. Python, JavaScript/TypeScript, and Actions
+still run the extended security queries. Review CLI compatibility when updating
+the CodeQL action; update all three bundle asset IDs and checksums together in
+`codeql.yml` when upgrading the CLI, then require all language jobs to pass.
+
 Run the additional local checks in the isolated test environment:
 
 ```sh

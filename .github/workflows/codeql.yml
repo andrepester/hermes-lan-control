@@ -30,13 +30,35 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [python, javascript-typescript, actions]
+        # CodeQL bundle v2.27.4: update asset IDs and checksums together.
+        include:
+          - language: python
+            bundle_asset: '692239340'
+            bundle_sha256: d862cb11aff035988f178703b69751be072f2aa7e76616f16bb725a207b50b7d
+          - language: javascript-typescript
+            bundle_asset: '692239234'
+            bundle_sha256: 082e798c97831283a2a5f69e9198c51270e5767013d5333daeeab6520af9ce72
+          - language: actions
+            bundle_asset: '692238277'
+            bundle_sha256: f12b84c1ed3540c54691257ddea1b72b62f785c8bb3eca907562c6a8a2361d32
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Download checksum-pinned CodeQL bundle
+        env:
+          BUNDLE_ASSET: ${{ matrix.bundle_asset }}
+          BUNDLE_SHA256: ${{ matrix.bundle_sha256 }}
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --retry 3 --retry-max-time 120 --connect-timeout 15 --max-time 180 \
+            --header 'Accept: application/octet-stream' \
+            --output "$RUNNER_TEMP/codeql-bundle.tar.zst" \
+            "https://api.github.com/repos/github/codeql-action/releases/assets/$BUNDLE_ASSET"
+          printf '%s  %s\n' "$BUNDLE_SHA256" "$RUNNER_TEMP/codeql-bundle.tar.zst" | sha256sum --check --strict
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
         with:
+          tools: ${{ runner.temp }}/codeql-bundle.tar.zst
           languages: ${{ matrix.language }}
           build-mode: none
           queries: security-extended
