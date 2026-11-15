@@ -19,7 +19,7 @@ footer { height:20px; display:flex; align-items:stretch; gap:8px; padding:0 4px;
 <div class="controls">
 <label>Ping <select id="ping"><option value="down">Keine Antwort</option><option value="up">Antwortet</option><option value="error">Lokaler Ping-Fehler</option></select></label>
 <label><input id="health-on" type="checkbox" checked>HTTP aktiv</label>
-<label>Health/Transport <select id="mode"><option value="unhealthy">Ungesund (503)</option><option value="healthy">Gesund (200)</option><option value="auth">Authentifizierung (401)</option><option value="timeout">HTTP-Timeout</option><option value="config">Konfigurationsfehler</option><option value="backend">Backend-Ausfall</option><option value="stale">Antwort aussetzen (veraltet nach ≤ 8 s)</option></select></label>
+<label>Health/Transport <select id="mode"><option value="unhealthy">Ungesund (503)</option><option value="healthy">Gesund (200)</option><option value="auth">Authentifizierung (401)</option><option value="timeout">HTTP-Timeout</option><option value="config">Konfigurationsfehler</option><option value="backend">Backend-Ausfall</option><option value="stale">Antwort aussetzen (veraltet nach Intervall + Timeout + 1 s)</option></select></label>
 <label><input id="long" type="checkbox">Langer Anzeigename</label>
 <button id="theme">Theme wechseln</button><button id="narrow">Schmale Leiste</button><button id="profile">Profil wechseln</button><button id="reload">Plugin neu laden</button><button id="disable">Deaktivieren</button><button id="enable">Aktivieren</button>
 </div>

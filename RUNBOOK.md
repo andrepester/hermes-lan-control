@@ -87,6 +87,11 @@ plugin module with SDK and React mocks. Coverage includes pending requests,
 stale results, manual rechecks, repeated clicks, profile/connection changes,
 late responses, cleanup, accessibility attributes, native ListRow props,
 ordered settings fields, optional HTTP settings, and partial save failures.
+An injected monotonic clock covers the immediate post-WoL recheck, five-second
+start cadence, 180-second deadline, slow/error responses, manual checks,
+repeated wakes, and context/revision changes. Backend tests verify the 60-second
+default, preservation of saved intervals, and fresh rechecks despite a 60- or
+300-second cache interval.
 
 If Ruby is available, check YAML/JSON consistency without adding a parser to
 Hermes' environment:
@@ -139,7 +144,8 @@ Check the following behavior:
    `POST /settings`; no normal settings RPC or separate token POST is sent.
 6. Simulate a backend outage or configuration error: red with power disabled.
    Start from green and suspend responses: with the default timing, the result
-   becomes stale within eight seconds. Resume responses or reload to recover.
+   becomes stale within 63 seconds (60-second interval plus timeout and grace).
+   Resume responses or reload to recover.
 7. Check long names, a narrow status bar, themes, tooltips, keyboard focus,
    and accessible status labels. The compact display stays dot, name, power.
 8. Switch profile or connection during checks and saves. Old results, drafts,
@@ -147,6 +153,17 @@ Check the following behavior:
    the plugin and check cleanup and reloading.
 9. Capture harness screenshots at 100% browser zoom. Identify them as harness
    screenshots; use native screenshots for a future catalog submission.
+10. Start with ping down and HTTP 200, then send one simulated wake. Check that
+    fresh ping/HTTP counters advance immediately and every five seconds while
+    the display stays yellow with its original name. Set ping up with HTTP 503:
+    waiting ends on the next fresh result, the dot stays yellow, and normal
+    timing resumes. Repeat with HTTP disabled to verify green on ping success.
+11. Keep ping down after a simulated wake for 180 seconds: waiting ends with
+    the timeout tooltip and no automatic packet. Repeat with transport errors,
+    manual rechecks, and a profile/reload change. Use the deterministic controller
+    tests for exact timing boundaries and late responses; the harness uses real
+    elapsed time. Ping/HTTP outcome controls simulate network changes without
+    emitting a settings-change event.
 
 Stop only this test server with Ctrl-C. Disposable outputs are
 `tests/harness/dist/`, `tests/harness/node_modules/`,
@@ -163,7 +180,9 @@ and green variables and a neutral `LAN host` display name.
 including the neighboring native indicators, Smart, and the app version.
 `settings.png` shows the native configuration form with an unsaved example draft.
 Use `LAN host`, `192.0.2.10`, `02:00:00:00:00:10`, `192.0.2.255`, port `9`,
-interval `5`, timeout `2`, `https://example.com`, and expected status `200`.
+interval `60`, timeout `2`, `https://example.com`, and expected status `200`.
+The existing settings capture predates the 60-second default and shows an
+explicitly entered five-second interval, which remains supported.
 Leave the bearer token blank. Do not save or probe these example values. Reduce
 the native view zoom only as needed to fit all fields and buttons, crop to the
 form, then restore the previous zoom and discard the draft with **Reload**.

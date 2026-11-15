@@ -29,7 +29,7 @@ COOLDOWN = 10.0
 REQUEST_BUDGET = 32.0
 TOKEN_KEY = "LAN_CONTROL_BEARER_TOKEN"
 DEFAULTS = {"display_name": "", "host": "", "wol_mac": "", "wol_broadcast": "", "wol_port": 9,
-            "interval": 5, "timeout": 2, "health_url": "", "expected_status": ""}
+            "interval": 60, "timeout": 2, "health_url": "", "expected_status": ""}
 _revision_key = secrets.token_bytes(32)
 
 
@@ -107,7 +107,7 @@ class Settings:
     host: str
     url: str = field(repr=False)
     expected: int = 200
-    interval: float = 5.0
+    interval: float = 60.0
     timeout: float = 2.0
     token: str = field(default="", repr=False)
     mac: str = ""
@@ -135,7 +135,7 @@ class Settings:
         label = string(raw, "display_name") or host
         if len(label) > 200:
             raise ConfigError("Display name must be no longer than 200 characters.")
-        interval = number(raw, "interval", 5, 2, 300)
+        interval = number(raw, "interval", DEFAULTS["interval"], 2, 300)
         timeout = number(raw, "timeout", 2, 0.2, 30)
         if timeout >= interval:
             raise ConfigError("Timeout must be shorter than the check interval.")
